@@ -297,9 +297,9 @@ export default function App() {
         </span>
         <div style={{ display: "flex", gap: 20 }}>
           {[
-            ["GitHub",    "https://github.com/YOUR_USERNAME/cre-prediction-market"],
+            ["GitHub",    "https://github.com/livinalt/cre-prediction-market-2.git"],
             ["Etherscan", "https://sepolia.etherscan.io/address/0xf34c4C6eE65ddbD0C71D4313B774726b280590e9"],
-            ["Tenderly",  "https://dashboard.tenderly.co"],
+            ["Tenderly",  "https://dashboard.tenderly.co/Jerly/cx/testnet/6b716f89-d035-49ad-a3c2-a6f63fc442b0"],
           ].map(([l, u]) => (
             <a key={l} href={u} target="_blank" rel="noreferrer"
               style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--muted)", textDecoration: "none" }}
