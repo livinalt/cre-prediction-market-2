@@ -145,21 +145,20 @@ export default function App() {
 
       <main style={{ maxWidth: 1280, margin: "0 auto", padding: "40px 32px 60px", position: "relative", zIndex: 1 }}>
 
-        {/* Hero */}
-        <div style={{ marginBottom: 32 }}>
+        <div style={{ marginBottom: 40 }}>
           <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--accent)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ display: "block", width: 24, height: 1, background: "var(--accent)" }} />
-            Chainlink CRE · Gemini AI Settlement
+            Chainlink CRE · Automated Settlement
           </div>
-          <h1 style={{ fontSize: 44, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.1, marginBottom: 10 }}>
+          <h1 style={{ fontSize: 48, fontWeight: 800, letterSpacing: -1.5, lineHeight: 1.1, marginBottom: 10 }}>
             Predict the Future,{" "}
+            <br />
             <span style={{ background: "linear-gradient(135deg,#7c6af7,#22d3a5)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               Settle On-Chain
             </span>
           </h1>
           <p style={{ fontSize: 14, color: "var(--muted)", maxWidth: 480, lineHeight: 1.7 }}>
-            Ask any yes/no question. Users stake ETH on the outcome.
-            Chainlink CRE + Google Gemini AI determines the result.
+            Markets on ETH prices and real-world events. All outcomes resolved automatically by Chainlink CRE — no admins, no delays.
           </p>
         </div>
 
