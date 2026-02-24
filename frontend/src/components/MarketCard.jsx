@@ -5,15 +5,16 @@ import { sepolia } from "thirdweb/chains";
 import { client } from "../App";
 import { MARKET_ADDRESS, MARKET_ABI } from "../lib/contracts";
 import { fmtEth, calcProb } from "../lib/utils";
+import { notify } from "../lib/useNotifications";
 
-export default function MarketCard({ market, userPosition, onRefresh, onToast }) {
+export default function MarketCard({ market, userPosition, onRefresh, onToast, onNotify }) {
   const account = useActiveAccount();
   const { mutate: sendTx, isPending } = useSendTransaction();
   const [settling, setSettling]     = useState(false);
   const [claiming, setClaiming]     = useState(false);
   const [predicting, setPredicting] = useState(null);
 
-  const toast = (msg, kind = "info") => onToast?.(msg, kind) ?? console.log(msg);
+  const toast    = (msg, kind = "info") => onToast?.(msg, kind) ?? console.log(msg);
   const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
 
   const isOpen    = !market.settled;
@@ -45,8 +46,16 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
 
     toast("Confirm in wallet…", "info");
     sendTx(tx, {
-      onSuccess: () => { toast("Prediction placed ✓", "success"); setTimeout(onRefresh, 2000); setPredicting(null); },
-      onError:   e  => { toast(e.message.slice(0, 60), "error"); setPredicting(null); },
+      onSuccess: () => {
+        toast("Prediction placed ✓", "success");
+        onNotify?.(notify.predicted(market.id, side, 1_000_000_000_000_000));
+        setTimeout(onRefresh, 2000);
+        setPredicting(null);
+      },
+      onError: e => {
+        toast(e.message.slice(0, 60), "error");
+        setPredicting(null);
+      },
     });
   }
 
@@ -55,12 +64,20 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
     setSettling(true);
     let tx;
     try {
-      tx = prepareContractCall({ contract, method: "requestSettlement", params: [BigInt(market.id)] });
+      tx = prepareContractCall({
+        contract, method: "requestSettlement",
+        params: [BigInt(market.id)],
+      });
     } catch (e) { toast("Failed to prepare tx", "error"); setSettling(false); return; }
     toast("Requesting AI settlement…", "info");
     sendTx(tx, {
-      onSuccess: () => { toast("Settlement requested ✓", "success"); setTimeout(onRefresh, 3000); setSettling(false); },
-      onError:   e  => { toast(e.message.slice(0, 60), "error"); setSettling(false); },
+      onSuccess: () => {
+        toast("Settlement requested ✓", "success");
+        onNotify?.(notify.settled(market.id, market.question));
+        setTimeout(onRefresh, 3000);
+        setSettling(false);
+      },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setSettling(false); },
     });
   }
 
@@ -69,12 +86,21 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
     setClaiming(true);
     let tx;
     try {
-      tx = prepareContractCall({ contract, method: "claim", params: [BigInt(market.id)] });
+      tx = prepareContractCall({
+        contract, method: "claim",
+        params: [BigInt(market.id)],
+      });
     } catch (e) { toast("Failed to prepare tx", "error"); setClaiming(false); return; }
     toast("Claiming winnings…", "info");
     sendTx(tx, {
-      onSuccess: () => { toast("Winnings claimed ✓", "success"); setTimeout(onRefresh, 2000); setClaiming(false); },
-      onError:   e  => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
+      onSuccess: () => {
+        toast("Winnings claimed ✓", "success");
+        // Estimate winnings — actual amount needs event parsing but this is good enough
+        onNotify?.(notify.claimed(market.id, userPosition?.amount ?? 0));
+        setTimeout(onRefresh, 2000);
+        setClaiming(false);
+      },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
     });
   }
 
@@ -91,7 +117,6 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
         borderRadius: 10, overflow: "hidden",
         transition: "transform 0.15s, box-shadow 0.15s",
         display: "flex", flexDirection: "column",
-        // Full width on mobile, natural height — no fixed heights
         width: "100%", boxSizing: "border-box",
       }}
       onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.3)"; }}
@@ -128,7 +153,7 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
           )}
         </div>
 
-        {/* Question — 2 lines max, consistent height */}
+        {/* Question */}
         <div style={{
           fontSize: 13, fontWeight: 700, lineHeight: 1.45, letterSpacing: -0.2,
           display: "-webkit-box", WebkitLineClamp: 2,
@@ -151,12 +176,8 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
         </div>
       </div>
 
-      {/* Stats — responsive: wraps gracefully */}
-      <div style={{
-        padding: "8px 12px",
-        display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6,
-        borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-      }}>
+      {/* Stats */}
+      <div style={{ padding: "8px 12px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
         {[
           { label: "Pool", value: totalPool.toFixed(3) + "Ξ", color: "var(--text)" },
           { label: "YES",  value: (yesPool / 1e18).toFixed(3) + "Ξ", color: "#22c55e" },
@@ -185,19 +206,14 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
                   onClick={() => placeBet(btn.side)}
                   disabled={disabled}
                   style={{
-                    flex: 1,
-                    // Taller tap target on touch devices
-                    padding: "8px 0",
-                    borderRadius: 7,
+                    flex: 1, padding: "8px 0", borderRadius: 7,
                     border: `1px solid ${isThisSide ? btn.color + "80" : btn.color + "25"}`,
                     background: isThisSide ? btn.hover : isOtherSide ? "rgba(255,255,255,0.02)" : btn.bg,
                     color: isOtherSide ? "var(--muted)" : btn.color,
                     fontSize: 12, fontWeight: 700,
                     cursor: disabled ? "not-allowed" : "pointer",
                     opacity: isOtherSide ? 0.25 : 1,
-                    transition: "all 0.2s",
-                    fontFamily: "var(--sans)",
-                    // Prevent text overflow on narrow cards
+                    transition: "all 0.2s", fontFamily: "var(--sans)",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}
                   onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = btn.hover; }}
@@ -210,7 +226,7 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast })
           </div>
         )}
 
-        {/* Request AI Settlement — only creator or predictors see this */}
+        {/* Request AI Settlement — creator or predictor only */}
         {canSettle && (
           <button
             onClick={requestSettlement}

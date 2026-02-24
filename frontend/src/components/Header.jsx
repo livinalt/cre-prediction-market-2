@@ -28,7 +28,7 @@ const ghostBtn = {
   display: "flex", alignItems: "center", gap: 5,
 };
 
-export default function Header({ onRefresh, loading, onCreateMarket }) {
+export default function Header({ onRefresh, loading, onCreateMarket, unreadCount = 0, onOpenNotifications }) {
   const width    = useWindowWidth();
   const isMobile = width < 640;
   const isTablet = width >= 640 && width < 1024;
@@ -130,14 +130,37 @@ export default function Header({ onRefresh, loading, onCreateMarket }) {
             {/* Refresh */}
             <div
               onClick={!loading ? onRefresh : undefined}
-              style={{ ...ghostBtn, opacity: loading ? 0.4 : 1, marginRight: 4 }}
+              style={{ ...ghostBtn, opacity: loading ? 0.4 : 1 }}
               onMouseEnter={e => { if (!loading) e.currentTarget.style.color = "var(--text)"; }}
               onMouseLeave={e => e.currentTarget.style.color = "var(--muted)"}
             >
               {loading ? "..." : "⟳"}
             </div>
 
-            {/* Create Market — shorter label on tablet */}
+            {/* Bell icon */}
+            <div
+              onClick={onOpenNotifications}
+              style={{ ...ghostBtn, position: "relative", padding: "6px 8px" }}
+              onMouseEnter={e => e.currentTarget.style.color = "var(--text)"}
+              onMouseLeave={e => e.currentTarget.style.color = "var(--muted)"}
+            >
+              🔔
+              {unreadCount > 0 && (
+                <span style={{
+                  position: "absolute", top: 2, right: 2,
+                  minWidth: 14, height: 14, borderRadius: 99,
+                  background: "#7c6af7", color: "#fff",
+                  fontSize: 8, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "var(--mono)", padding: "0 3px",
+                  border: "1.5px solid rgba(5,5,8,1)",
+                }}>
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </div>
+
+            {/* Create Market */}
             <div onClick={onCreateMarket} style={{
               padding: isTablet ? "6px 10px" : "7px 14px",
               borderRadius: 8, cursor: "pointer",
@@ -200,6 +223,34 @@ export default function Header({ onRefresh, loading, onCreateMarket }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", fontFamily: "var(--mono)", fontSize: 11, color: "var(--muted)" }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22d3a5", boxShadow: "0 0 5px #22d3a5", display: "inline-block" }} />
               Ethereum Sepolia
+            </div>
+
+            {/* Notifications */}
+            <div
+              onClick={() => { onOpenNotifications(); setShowMobileMenu(false); }}
+              style={{
+                padding: "10px 10px", borderRadius: 8, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--mono)", fontSize: 12, color: "var(--muted)" }}>
+                <span>🔔</span>
+                <span>Notifications</span>
+              </div>
+              {unreadCount > 0 && (
+                <span style={{
+                  minWidth: 18, height: 18, borderRadius: 99,
+                  background: "#7c6af7", color: "#fff",
+                  fontSize: 9, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "var(--mono)", padding: "0 4px",
+                }}>
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
             </div>
 
             {/* How it works */}
