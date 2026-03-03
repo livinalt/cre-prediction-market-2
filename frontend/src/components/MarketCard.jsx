@@ -11,41 +11,33 @@ import MarketDetailModal from "./MarketDetailModal";
 export default function MarketCard({ market, userPosition, onRefresh, onToast, onNotify }) {
   const account = useActiveAccount();
   const { mutate: sendTx, isPending } = useSendTransaction();
+  const [predicting, setPredicting] = useState(null);
   const [settling, setSettling]     = useState(false);
   const [claiming, setClaiming]     = useState(false);
-  const [predicting, setPredicting] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
 
-  const toast    = (msg, kind = "info") => onToast?.(msg, kind) ?? console.log(msg);
+  const toast    = (msg, kind = "info") => onToast?.(msg, kind);
   const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
 
-  // Amber dot while pending settlement — read from localStorage
   const isPendingSettlement = !!localStorage.getItem(`pending_settlement_${market.id}`);
 
-  // Clear pending flag when market settles
   useEffect(() => {
-    if (market.settled) {
-      localStorage.removeItem(`pending_settlement_${market.id}`);
-    }
+    if (market.settled) localStorage.removeItem(`pending_settlement_${market.id}`);
   }, [market.settled]);
 
   const isOpen    = !market.settled;
   const yesPool   = Number(market.totalYesPool);
   const noPool    = Number(market.totalNoPool);
-  const totalPool = (yesPool + noPool) / 1e18;
   const prob      = calcProb(yesPool, noPool);
   const hasPos    = !!userPosition;
   const userWon   = hasPos && market.settled &&
-    Number(userPosition.prediction) === Number(market.outcome) &&
-    !userPosition.claimed;
+    Number(userPosition.prediction) === Number(market.outcome) && !userPosition.claimed;
   const isCreator = account?.address?.toLowerCase() === market.creator?.toLowerCase();
   const canSettle = isOpen && (isCreator || hasPos);
+  const totalPool = ((yesPool + noPool) / 1e18).toFixed(4);
 
   function placeBet(side) {
-    if (!account)            { toast("Connect wallet first", "error"); return; }
-    if (hasPos)              { toast("Already predicted", "error"); return; }
-    if (predicting !== null) return;
-
+    if (!account || hasPos || predicting !== null) return;
     setPredicting(side);
     let tx;
     try {
@@ -54,283 +46,297 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
         params: [BigInt(market.id), side],
         value: BigInt(1_000_000_000_000_000),
       });
-    } catch (e) { toast("Failed to prepare tx", "error"); setPredicting(null); return; }
-
+    } catch { toast("Failed to prepare tx", "error"); setPredicting(null); return; }
     toast("Confirm in wallet…", "info");
     sendTx(tx, {
-      onSuccess: () => {
-        toast("Prediction placed ✓", "success");
-        onNotify?.(notify.predicted(market.id, side, 1_000_000_000_000_000));
-        setTimeout(onRefresh, 2000);
-        setPredicting(null);
-      },
-      onError: e => {
-        toast(e.message.slice(0, 60), "error");
-        setPredicting(null);
-      },
+      onSuccess: () => { toast("Prediction placed ✓", "success"); onNotify?.(notify.predicted(market.id, side, 1_000_000_000_000_000)); setTimeout(onRefresh, 2000); setPredicting(null); },
+      onError:   e => { toast(e.message.slice(0, 60), "error"); setPredicting(null); },
     });
   }
 
   function requestSettlement() {
-    if (!account) { toast("Connect wallet first", "error"); return; }
+    if (!account) return;
     setSettling(true);
     let tx;
     try {
-      tx = prepareContractCall({
-        contract, method: "requestSettlement",
-        params: [BigInt(market.id)],
-      });
-    } catch (e) { toast("Failed to prepare tx", "error"); setSettling(false); return; }
-
+      tx = prepareContractCall({ contract, method: "requestSettlement", params: [BigInt(market.id)] });
+    } catch { toast("Failed to prepare tx", "error"); setSettling(false); return; }
     toast("Requesting AI settlement…", "info");
     sendTx(tx, {
       onSuccess: () => {
         toast("Settlement requested ✓", "success");
-        // Store pending flag — notification panel will track stale state
         localStorage.setItem(`pending_settlement_${market.id}`, Date.now().toString());
-        // Fire notification with pending status
         onNotify?.(notify.settlementRequested(market.id, market.question));
         setTimeout(onRefresh, 3000);
         setSettling(false);
       },
-      onError: e => {
-        toast(e.message.slice(0, 60), "error");
-        setSettling(false);
-      },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setSettling(false); },
     });
   }
 
   function claimWinnings() {
-    if (!account) { toast("Connect wallet first", "error"); return; }
+    if (!account) return;
     setClaiming(true);
     let tx;
     try {
-      tx = prepareContractCall({
-        contract, method: "claim",
-        params: [BigInt(market.id)],
-      });
-    } catch (e) { toast("Failed to prepare tx", "error"); setClaiming(false); return; }
-
+      tx = prepareContractCall({ contract, method: "claim", params: [BigInt(market.id)] });
+    } catch { toast("Failed to prepare tx", "error"); setClaiming(false); return; }
     toast("Claiming winnings…", "info");
     sendTx(tx, {
-      onSuccess: () => {
-        toast("Winnings claimed ✓", "success");
-        onNotify?.(notify.claimed(market.id, userPosition?.amount ?? 0));
-        setTimeout(onRefresh, 2000);
-        setClaiming(false);
-      },
-      onError: e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
+      onSuccess: () => { toast("Winnings claimed ✓", "success"); onNotify?.(notify.claimed(market.id, userPosition?.amount ?? 0)); setTimeout(onRefresh, 2000); setClaiming(false); },
+      onError:   e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
     });
   }
 
-  const BTNS = [
-    { label: "Yes", side: 0, color: "#22c55e", bg: "rgba(34,197,94,0.07)",  hover: "rgba(34,197,94,0.15)"  },
-    { label: "No",  side: 1, color: "#ef4444", bg: "rgba(239,68,68,0.07)",  hover: "rgba(239,68,68,0.15)"  },
-  ];
-
-  // Live dot color:
-  // green  = open, no pending
-  // amber  = open, settlement pending
-  // red/green = settled
-  const liveDotColor = isPendingSettlement ? "#fbbf24" : "#22c55e";
-  const liveLabel    = isPendingSettlement ? "SETTLING" : "LIVE";
+  // Card accent — subtle top border color per state
+  const accentColor = !isOpen
+    ? (market.outcome === 0 ? "#22c55e" : "#ef4444")
+    : isPendingSettlement ? "#f59e0b"
+    : hasPos ? "#7c6af7"
+    : "transparent";
 
   return (
     <>
-    <div
-      onClick={() => setShowDetail(true)}
-      style={{
-        background: "var(--surface)",
-        border: `1px solid ${hasPos ? "rgba(124,106,247,0.3)" : "var(--border)"}`,
-        borderRadius: 10, overflow: "hidden",
-        transition: "transform 0.15s, box-shadow 0.15s",
-        display: "flex", flexDirection: "column",
-        width: "100%", boxSizing: "border-box",
-        cursor: "pointer",
-      }}
-      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(124,106,247,0.15)"; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}
-    >
-      {/* Position strip */}
-      {hasPos && (
-        <div style={{ padding: "3px 12px", background: "rgba(124,106,247,0.07)", borderBottom: "1px solid rgba(124,106,247,0.12)", fontFamily: "var(--mono)", fontSize: 9, color: "#a78bfa" }}>
-          {Number(userPosition.prediction) === 0 ? "YES" : "NO"} · {fmtEth(userPosition.amount)} ETH
-          {userPosition.claimed && " · claimed"}
-        </div>
-      )}
+      <div
+        onClick={() => setShowDetail(true)}
+        style={{
+          background: "#111111",
+          border: "1px solid rgba(255,255,255,0.07)",
+          borderTop: `2px solid ${accentColor}`,
+          borderRadius: 10,
+          display: "flex", flexDirection: "column",
+          cursor: "pointer",
+          transition: "border-color 0.15s, box-shadow 0.15s, transform 0.15s",
+          overflow: "hidden",
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.borderColor = "rgba(255,255,255,0.13)";
+          e.currentTarget.style.boxShadow   = "0 6px 24px rgba(0,0,0,0.45)";
+          e.currentTarget.style.transform   = "translateY(-1px)";
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)";
+          e.currentTarget.style.boxShadow   = "none";
+          e.currentTarget.style.transform   = "none";
+        }}
+      >
+        {/* Position strip */}
+        {hasPos && (
+          <div style={{
+            padding: "4px 12px",
+            background: "rgba(124,106,247,0.08)",
+            borderBottom: "1px solid rgba(124,106,247,0.12)",
+            fontFamily: "var(--mono)", fontSize: 9,
+            color: "rgba(167,139,250,0.7)",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <span style={{
+              width: 4, height: 4, borderRadius: "50%",
+              background: Number(userPosition.prediction) === 0 ? "#a78bfa" : "rgba(167,139,250,0.4)",
+              display: "inline-block", flexShrink: 0,
+            }} />
+            {Number(userPosition.prediction) === 0 ? "YES" : "NO"} · {fmtEth(userPosition.amount)} ETH
+            {userPosition.claimed && " · claimed"}
+          </div>
+        )}
 
-      {/* Header */}
-      <div style={{ padding: "12px 12px 6px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 0.8, textTransform: "uppercase", color: "#a78bfa" }}>
-            #{market.id}
-          </span>
-          {isOpen ? (
-            <span style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: "var(--mono)", fontSize: 9, color: liveDotColor }}>
-              {/* Dot — pulses amber when settling */}
-              <span style={{
-                width: 5, height: 5, borderRadius: "50%",
-                background: liveDotColor,
-                boxShadow: `0 0 4px ${liveDotColor}`,
-                display: "inline-block",
-                animation: isPendingSettlement ? "pulseGlow 1.5s ease-in-out infinite" : "none",
-              }} />
-              {liveLabel}
-              {isCreator && (
-                <span style={{ marginLeft: 2, fontSize: 8, color: "#a78bfa", background: "rgba(124,106,247,0.1)", border: "1px solid rgba(124,106,247,0.2)", padding: "0px 5px", borderRadius: 99 }}>
-                  yours
-                </span>
-              )}
+        {/* Header */}
+        <div style={{ padding: "14px 14px 8px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.2)" }}>
+              #{market.id}
             </span>
-          ) : (
-            <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: market.outcome === 0 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>
-              SETTLED · {market.outcome === 0 ? "YES" : "NO"} · {market.confidence}%
+
+            {isOpen ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                {isPendingSettlement && (
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "#f59e0b", opacity: 0.8 }}>settling</span>
+                )}
+                <span style={{
+                  width: 5, height: 5, borderRadius: "50%",
+                  background: isPendingSettlement ? "#f59e0b" : "#22c55e",
+                  display: "inline-block",
+                  boxShadow: isPendingSettlement ? "0 0 5px #f59e0b60" : "0 0 5px #22c55e60",
+                  animation: isPendingSettlement ? "subtlePulse 2s ease-in-out infinite" : "none",
+                }} />
+              </div>
+            ) : (
+              <span style={{
+                fontFamily: "var(--mono)", fontSize: 9, fontWeight: 600,
+                color: market.outcome === 0 ? "#4ade80" : "#f87171",
+                background: market.outcome === 0 ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                border: `1px solid ${market.outcome === 0 ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
+                padding: "2px 7px", borderRadius: 99,
+              }}>
+                {market.outcome === 0 ? "YES" : "NO"} · {market.confidence}%
+              </span>
+            )}
+          </div>
+
+          {/* Question */}
+          <p style={{
+            fontSize: 13, fontWeight: 600, lineHeight: 1.45,
+            letterSpacing: -0.2, color: "rgba(255,255,255,0.82)",
+            margin: 0,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            minHeight: "2.9em",
+          }}>
+            {market.question}
+          </p>
+        </div>
+
+        {/* Prob bar */}
+        <div style={{ padding: "0 14px 12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#4ade80", opacity: 0.8 }}>
+              YES {prob}%
+            </span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#f87171", opacity: 0.7 }}>
+              {100 - prob}%
+            </span>
+          </div>
+          <div style={{
+            height: 3, borderRadius: 99,
+            background: "rgba(239,68,68,0.2)",
+            overflow: "hidden",
+          }}>
+            <div style={{
+              height: "100%",
+              width: `${prob}%`,
+              background: "linear-gradient(90deg, #22c55e, #4ade80)",
+              borderRadius: 99,
+              transition: "width 0.5s ease",
+            }} />
+          </div>
+        </div>
+
+        {/* Pool stat */}
+        <div style={{
+          padding: "8px 14px",
+          borderTop: "1px solid rgba(255,255,255,0.05)",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+            {totalPool} ETH pool
+          </span>
+          {isCreator && (
+            <span style={{
+              fontFamily: "var(--mono)", fontSize: 9,
+              color: "rgba(167,139,250,0.6)",
+              background: "rgba(124,106,247,0.08)",
+              border: "1px solid rgba(124,106,247,0.15)",
+              padding: "1px 6px", borderRadius: 99,
+            }}>
+              yours
             </span>
           )}
         </div>
 
-        {/* Question */}
-        <div style={{
-          fontSize: 13, fontWeight: 700, lineHeight: 1.45, letterSpacing: -0.2,
-          display: "-webkit-box", WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical", overflow: "hidden",
-          minHeight: "2.9em",
-        }}>
-          {market.question}
+        {/* Actions */}
+        <div
+          style={{ padding: "0 10px 10px", display: "flex", flexDirection: "column", gap: 5 }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Bet buttons */}
+          {isOpen && !hasPos && (
+            <div style={{ display: "flex", gap: 5 }}>
+              {[
+                { label: "Yes", side: 0, activeColor: "#22c55e", activeBg: "rgba(34,197,94,0.12)", activeBorder: "rgba(34,197,94,0.3)" },
+                { label: "No",  side: 1, activeColor: "#ef4444", activeBg: "rgba(239,68,68,0.12)", activeBorder: "rgba(239,68,68,0.3)" },
+              ].map(btn => {
+                const isThis   = predicting === btn.side;
+                const isOther  = predicting !== null && predicting !== btn.side;
+                const disabled = predicting !== null || isPending;
+                return (
+                  <button key={btn.side} onClick={() => placeBet(btn.side)} disabled={disabled}
+                    style={{
+                      flex: 1, padding: "7px 0", borderRadius: 7,
+                      border: `1px solid ${isThis ? btn.activeBorder : "rgba(255,255,255,0.08)"}`,
+                      background: isThis ? btn.activeBg : "rgba(255,255,255,0.03)",
+                      color: isThis ? btn.activeColor : isOther ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.55)",
+                      fontSize: 11, fontWeight: 600,
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      transition: "all 0.15s", fontFamily: "var(--sans)",
+                    }}
+                    onMouseEnter={e => { if (!disabled && !isThis) { e.currentTarget.style.background = btn.activeBg; e.currentTarget.style.color = btn.activeColor; e.currentTarget.style.borderColor = btn.activeBorder; }}}
+                    onMouseLeave={e => { if (!disabled && !isThis) { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}}
+                  >
+                    {isThis ? "Confirming…" : btn.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Settlement */}
+          {canSettle && (
+            <button onClick={e => { e.stopPropagation(); requestSettlement(); }} disabled={settling || isPending}
+              style={{
+                width: "100%", padding: "7px 0", borderRadius: 7,
+                border: "1px solid rgba(245,158,11,0.2)",
+                background: "rgba(245,158,11,0.06)",
+                color: "rgba(245,158,11,0.7)",
+                fontSize: 11, fontWeight: 500,
+                cursor: settling ? "not-allowed" : "pointer",
+                opacity: settling ? 0.5 : 1,
+                transition: "all 0.15s", fontFamily: "var(--sans)",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(245,158,11,0.12)"; e.currentTarget.style.color = "#f59e0b"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.35)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(245,158,11,0.06)"; e.currentTarget.style.color = "rgba(245,158,11,0.7)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.2)"; }}
+            >
+              {settling ? "Requesting…" : "Request Settlement"}
+            </button>
+          )}
+
+          {/* Claim */}
+          {userWon && (
+            <button onClick={e => { e.stopPropagation(); claimWinnings(); }} disabled={claiming}
+              style={{
+                width: "100%", padding: "7px 0", borderRadius: 7,
+                border: "1px solid rgba(34,197,94,0.3)",
+                background: "rgba(34,197,94,0.1)",
+                color: "#4ade80",
+                fontSize: 11, fontWeight: 600,
+                cursor: claiming ? "not-allowed" : "pointer",
+                opacity: claiming ? 0.5 : 1,
+                transition: "all 0.15s", fontFamily: "var(--sans)",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(34,197,94,0.18)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(34,197,94,0.1)"; }}
+            >
+              {claiming ? "Claiming…" : "Claim Winnings"}
+            </button>
+          )}
+
+          {hasPos && market.settled && userPosition.claimed && (
+            <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.2)", padding: "3px 0" }}>claimed</div>
+          )}
+          {hasPos && market.settled && Number(userPosition.prediction) !== Number(market.outcome) && (
+            <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.2)", padding: "3px 0" }}>better luck next time</div>
+          )}
         </div>
       </div>
 
-      {/* Prob bar */}
-      <div style={{ padding: "0 12px 10px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#22c55e" }}>YES {prob}%</span>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#ef4444" }}>{100 - prob}% NO</span>
-        </div>
-        <div style={{ height: 3, borderRadius: 99, background: "var(--border2)", overflow: "hidden", display: "flex" }}>
-          <div style={{ width: `${prob}%`, background: "#22c55e", transition: "width 0.5s" }} />
-          <div style={{ width: `${100 - prob}%`, background: "#ef4444" }} />
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div style={{ padding: "8px 12px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
-        {[
-          { label: "Pool", value: totalPool.toFixed(3) + "Ξ", color: "var(--text)" },
-          { label: "YES",  value: (yesPool / 1e18).toFixed(3) + "Ξ", color: "#22c55e" },
-          { label: "NO",   value: (noPool  / 1e18).toFixed(3) + "Ξ", color: "#ef4444" },
-        ].map((s, i) => (
-          <div key={i}>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 2 }}>{s.label}</div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 600, color: s.color }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Actions */}
-      <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6, marginTop: "auto" }}>
-
-        {/* Bet buttons */}
-        {isOpen && !hasPos && (
-          <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
-            {BTNS.map(btn => {
-              const isThisSide  = predicting === btn.side;
-              const isOtherSide = predicting !== null && predicting !== btn.side;
-              const disabled    = predicting !== null || isPending;
-              return (
-                <button
-                  key={btn.side}
-                  onClick={() => placeBet(btn.side)}
-                  disabled={disabled}
-                  style={{
-                    flex: 1, padding: "8px 0", borderRadius: 7,
-                    border: `1px solid ${isThisSide ? btn.color + "80" : btn.color + "25"}`,
-                    background: isThisSide ? btn.hover : isOtherSide ? "rgba(255,255,255,0.02)" : btn.bg,
-                    color: isOtherSide ? "var(--muted)" : btn.color,
-                    fontSize: 12, fontWeight: 700,
-                    cursor: disabled ? "not-allowed" : "pointer",
-                    opacity: isOtherSide ? 0.25 : 1,
-                    transition: "all 0.2s", fontFamily: "var(--sans)",
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                  }}
-                  onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = btn.hover; }}
-                  onMouseLeave={e => { if (!disabled) e.currentTarget.style.background = isThisSide ? btn.hover : btn.bg; }}
-                >
-                  {isThisSide ? "Confirming…" : btn.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Settlement button — clean, no pending UI on card */}
-        {canSettle && (
-          <button
-            onClick={e => { e.stopPropagation(); requestSettlement(); }}
-            disabled={settling || isPending}
-            style={{
-              width: "100%", padding: "8px 0", borderRadius: 7,
-              border: "1px solid rgba(251,191,36,0.3)",
-              background: "rgba(251,191,36,0.07)", color: "#fbbf24",
-              fontSize: 12, fontWeight: 700,
-              cursor: settling ? "not-allowed" : "pointer",
-              opacity: settling ? 0.5 : 1, fontFamily: "var(--sans)",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}
-          >
-            {settling ? "Requesting…" : "⚡ Request AI Settlement"}
-          </button>
-        )}
-
-        {/* Claim Winnings */}
-        {userWon && (
-          <button
-            onClick={e => { e.stopPropagation(); claimWinnings(); }}
-            disabled={claiming}
-            style={{
-              width: "100%", padding: "8px 0", borderRadius: 7,
-              border: "1px solid rgba(34,197,94,0.4)",
-              background: "rgba(34,197,94,0.12)", color: "#22c55e",
-              fontSize: 12, fontWeight: 700,
-              cursor: claiming ? "not-allowed" : "pointer",
-              opacity: claiming ? 0.5 : 1, fontFamily: "var(--sans)",
-            }}
-          >
-            {claiming ? "Claiming…" : "🏆 Claim Winnings"}
-          </button>
-        )}
-
-        {/* Status messages */}
-        {hasPos && market.settled && userPosition.claimed && (
-          <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 10, color: "var(--muted)" }}>
-            Winnings claimed ✓
-          </div>
-        )}
-        {hasPos && market.settled && Number(userPosition.prediction) !== Number(market.outcome) && (
-          <div style={{ textAlign: "center", fontFamily: "var(--mono)", fontSize: 10, color: "#ef4444" }}>
-            Better luck next time
-          </div>
-        )}
-      </div>
+      {showDetail && (
+        <MarketDetailModal
+          market={market}
+          userPosition={userPosition}
+          onClose={() => setShowDetail(false)}
+          onRefresh={onRefresh}
+          onToast={onToast}
+          onNotify={onNotify}
+        />
+      )}
 
       <style>{`
-        @keyframes pulseGlow {
+        @keyframes subtlePulse {
           0%, 100% { opacity: 1; }
-          50%       { opacity: 0.3; }
+          50%       { opacity: 0.35; }
         }
       `}</style>
-    </div>
-
-    {/* Detail modal */}
-    {showDetail && (
-      <MarketDetailModal
-        market={market}
-        userPosition={userPosition}
-        onClose={() => setShowDetail(false)}
-        onRefresh={onRefresh}
-        onToast={onToast}
-        onNotify={onNotify}
-      />
-    )}
-  </>
+    </>
   );
 }

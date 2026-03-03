@@ -1,25 +1,104 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+const ICONS = {
+  success: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="6.5" stroke="currentColor" strokeOpacity="0.4"/>
+      <path d="M4.5 7L6.5 9L9.5 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  error: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="6.5" stroke="currentColor" strokeOpacity="0.4"/>
+      <path d="M5 5L9 9M9 5L5 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  ),
+  info: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="6.5" stroke="currentColor" strokeOpacity="0.4"/>
+      <path d="M7 6.5V10M7 4.5V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  ),
+};
+
+const STYLES = {
+  success: { color: "#ffffff", accent: "rgba(255,255,255,0.5)", dot: "#22c55e" },
+  error:   { color: "#ffffff", accent: "rgba(255,255,255,0.5)", dot: "#ef4444" },
+  info:    { color: "#ffffff", accent: "rgba(255,255,255,0.5)", dot: "#a1a1aa" },
+};
 
 export default function Toast({ toast }) {
-  if (!toast) return null;
-  const colors = {
-    success: { bg: "rgba(34,197,94,0.1)",  border: "rgba(34,197,94,0.25)",  color: "#22c55e" },
-    error:   { bg: "rgba(239,68,68,0.1)",  border: "rgba(239,68,68,0.25)",  color: "#ef4444" },
-    info:    { bg: "rgba(124,106,247,0.1)", border: "rgba(124,106,247,0.25)", color: "#a78bfa" },
-  };
-  const c = colors[toast.kind] || colors.info;
+  const [visible, setVisible] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (toast) {
+      setLeaving(false);
+      setVisible(true);
+    } else {
+      setLeaving(true);
+      const t = setTimeout(() => setVisible(false), 200);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
+  if (!visible || !toast) return null;
+
+  const s = STYLES[toast.kind] || STYLES.info;
+
   return (
     <div style={{
-      position: "fixed", bottom: 24, right: 24, zIndex: 999,
-      padding: "10px 16px", borderRadius: 8,
-      background: c.bg, border: `1px solid ${c.border}`, color: c.color,
-      fontFamily: "var(--mono)", fontSize: 12,
-      boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-      animation: "slideUp 0.2s ease",
+      position: "fixed",
+      bottom: 24,
+      right: 24,
+      zIndex: 999,
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "11px 14px",
+      borderRadius: 10,
+      // Vercel-style: dark solid surface, subtle border, no color bleed
+      background: "#111111",
+      border: "1px solid rgba(255,255,255,0.1)",
+      boxShadow: "0 4px 24px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.04) inset",
       maxWidth: 320,
+      animation: leaving ? "toastOut 0.18s ease forwards" : "toastIn 0.18s ease forwards",
     }}>
-      {toast.msg}
-      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }`}</style>
+
+      {/* Status dot — only color element */}
+      <span style={{
+        width: 6, height: 6, borderRadius: "50%",
+        background: s.dot, flexShrink: 0,
+        boxShadow: `0 0 6px ${s.dot}40`,
+      }} />
+
+      {/* Icon */}
+      <span style={{ color: "rgba(255,255,255,0.4)", flexShrink: 0, display: "flex", alignItems: "center" }}>
+        {ICONS[toast.kind] || ICONS.info}
+      </span>
+
+      {/* Message */}
+      <span style={{
+        fontFamily: "var(--sans)",
+        fontSize: 12,
+        fontWeight: 500,
+        color: "#e4e4e7",
+        lineHeight: 1.4,
+        letterSpacing: -0.1,
+      }}>
+        {toast.msg}
+      </span>
+
+      <style>{`
+        @keyframes toastIn {
+          from { opacity: 0; transform: translateY(6px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0)   scale(1);    }
+        }
+        @keyframes toastOut {
+          from { opacity: 1; transform: translateY(0)   scale(1);    }
+          to   { opacity: 0; transform: translateY(4px) scale(0.97); }
+        }
+      `}</style>
     </div>
   );
 }

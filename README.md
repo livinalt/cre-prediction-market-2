@@ -1,6 +1,6 @@
 # Rev Markets — CRE Prediction Market
 
-![Website screenshot](screenshots/website.png)
+![Website screenshot](screenshots/homepage.png)
 
 > AI-powered prediction markets on Ethereum Sepolia. Ask any yes/no question, stake ETH on the outcome, and let Chainlink CRE + Google Gemini AI settle it automatically — no admins, no manual intervention, no trusted third party.
 

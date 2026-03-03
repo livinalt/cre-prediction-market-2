@@ -13,7 +13,7 @@ type Config = {
 };
 
 const initWorkflow = (config: Config) => {
-  // HTTP trigger (empty {} is fine for local sim/testing)
+  
   const httpCapability = new cre.capabilities.HTTPCapability();
   const httpTrigger = httpCapability.trigger({});
 
@@ -31,7 +31,6 @@ const initWorkflow = (config: Config) => {
     throw new Error(`Network not found for ${evmConfig.chainSelectorName}`);
   }
 
-  // This is the correct instantiation
   const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector);
 
   // Compute the event sig hash (keccak256)
@@ -39,16 +38,15 @@ const initWorkflow = (config: Config) => {
     toBytes("SettlementRequested(uint256,string)")
   );
 
-  // This returns the trigger object — NOT a new class!
   const evmLogTrigger = evmClient.logTrigger({
     addresses: [hexToBase64(evmConfig.marketAddress)],
     topics: [
-      { values: [hexToBase64(eventSigHash)] },  // topic0 = event sig
-      {},                                       // topic1 = any (uint256)
-      {},                                       // topic2 = any (string)
-      {},                                       // topic3 = unused
+      { values: [hexToBase64(eventSigHash)] },  
+      {},                                       
+      {},                                       
+      {},                                       
     ],
-    // Optional: confidence: "safe" | "finalized" | "latest" (default safe)
+    
   });
 
   return [

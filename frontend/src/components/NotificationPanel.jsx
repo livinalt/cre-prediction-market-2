@@ -1,5 +1,3 @@
-// src/components/NotificationPanel.jsx
-
 function timeAgo(timestamp) {
   const diff  = Date.now() - timestamp;
   const mins  = Math.floor(diff / 60000);
@@ -11,139 +9,78 @@ function timeAgo(timestamp) {
   return `${days}d ago`;
 }
 
-function StatusDot({ status }) {
-  const map = {
-    pending:   { color: "#a78bfa", pulse: true  },
-    stale:     { color: "#fbbf24", pulse: false },
-    resolved:  { color: "#22d3a5", pulse: false },
-    dismissed: { color: "#6b7280", pulse: false },
-    default:   { color: null,      pulse: false },
-  };
-  const s = map[status] || map.default;
-  if (!s.color) return null;
-  return (
-    <span style={{
-      width: 6, height: 6, borderRadius: "50%",
-      background: s.color,
-      boxShadow: s.pulse ? `0 0 5px ${s.color}` : "none",
-      display: "inline-block", flexShrink: 0, marginTop: 5,
-      animation: s.pulse ? "pulseGlow 1.8s ease-in-out infinite" : "none",
-    }} />
-  );
-}
-
 function NotificationItem({ n, onDismissSettlement, onClaimClick }) {
   const isPending   = n.status === "pending";
   const isStale     = n.status === "stale";
   const isDismissed = n.status === "dismissed";
   const isResolved  = n.status === "resolved";
 
-  // Border color based on status
-  const borderColor = isPending  ? "rgba(167,139,250,0.25)"
-    : isStale                    ? "rgba(251,191,36,0.3)"
-    : isDismissed                ? "transparent"
+  const bg = isPending ? "rgba(124,106,247,0.04)" : isStale ? "rgba(245,158,11,0.04)" : "transparent";
+  const leftBorder = isDismissed ? "transparent"
+    : isPending ? "rgba(124,106,247,0.4)"
+    : isStale   ? "rgba(245,158,11,0.4)"
+    : !n.read   ? (n.color || "rgba(124,106,247,0.4)")
     : "transparent";
 
-  // Background based on status
-  const bg = isPending  ? "rgba(124,106,247,0.04)"
-    : isStale            ? "rgba(251,191,36,0.04)"
-    : n.read             ? "transparent"
-    : "rgba(124,106,247,0.03)";
-
   return (
-    <div style={{
-      padding: "12px 16px",
-      borderBottom: "1px solid var(--border)",
-      background: bg,
-      borderLeft: `3px solid ${!n.read && !isDismissed ? (n.color || "#7c6af7") : borderColor || "transparent"}`,
-      opacity: isDismissed ? 0.5 : 1,
-      transition: "all 0.2s",
-      cursor: n.action === "claim" ? "pointer" : "default",
-    }}
+    <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.05)", background: bg, borderLeft: `2px solid ${leftBorder}`, opacity: isDismissed ? 0.45 : 1, transition: "all 0.15s", cursor: n.action === "claim" ? "pointer" : "default" }}
       onClick={() => { if (n.action === "claim" && onClaimClick) onClaimClick(n.marketId); }}
-      onMouseEnter={e => { if (n.action === "claim") e.currentTarget.style.background = "rgba(34,211,165,0.06)"; }}
+      onMouseEnter={e => { if (n.action === "claim") e.currentTarget.style.background = "rgba(34,197,94,0.05)"; }}
       onMouseLeave={e => { e.currentTarget.style.background = bg; }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
 
         {/* Icon */}
-        <div style={{
-          width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-          background: `${n.color || "#7c6af7"}15`,
-          border: `1px solid ${n.color || "#7c6af7"}25`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: isPending ? 14 : 13,
-          animation: isPending ? "spin 2s linear infinite" : "none",
-        }}>
+        <div style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, background: `${n.color || "rgba(124,106,247,1)"}12`, border: `1px solid ${n.color || "rgba(124,106,247,0.3)"}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, animation: isPending ? "spin 2s linear infinite" : "none" }}>
           {isPending ? "⟳" : n.icon}
         </div>
 
-        {/* Content */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-            <span style={{
-              fontSize: 12, fontWeight: 600,
-              color: isDismissed ? "var(--muted)" : n.read ? "var(--muted)" : "var(--text)",
-              lineHeight: 1.4,
-            }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: isDismissed || n.read ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.8)", lineHeight: 1.4 }}>
               {n.title}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-              <StatusDot status={n.status} />
-              <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)", marginTop: 2 }}>
+              {isPending && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(167,139,250,0.7)", display: "inline-block", animation: "subtlePulse 1.8s ease-in-out infinite" }} />}
+              {isStale   && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(245,158,11,0.7)", display: "inline-block" }} />}
+              {isResolved && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(34,197,94,0.7)", display: "inline-block" }} />}
+              <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.2)" }}>
                 {timeAgo(n.timestamp)}
               </span>
             </div>
           </div>
 
-          {/* Detail */}
           {n.detail && (
-            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--muted)", marginTop: 3, lineHeight: 1.5, wordBreak: "break-word" }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 3, lineHeight: 1.5, wordBreak: "break-word" }}>
               {n.detail}
             </div>
           )}
 
-          {/* Pending — progress hint */}
           {isPending && (
-            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 5 }}>
-              <div style={{ flex: 1, height: 2, borderRadius: 99, background: "var(--border2)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: "60%", background: "#a78bfa", borderRadius: 99, animation: "progressSlide 1.8s ease-in-out infinite" }} />
+            <div style={{ marginTop: 7, display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ flex: 1, height: 2, borderRadius: 99, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: "60%", background: "rgba(167,139,250,0.5)", borderRadius: 99, animation: "progressSlide 1.8s ease-in-out infinite" }} />
               </div>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "#a78bfa", flexShrink: 0 }}>
-                CRE running…
-              </span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(167,139,250,0.6)", flexShrink: 0 }}>CRE running…</span>
             </div>
           )}
 
-          {/* Stale — warning + dismiss */}
           {isStale && (
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{
-                padding: "6px 8px", borderRadius: 6,
-                background: "rgba(251,191,36,0.07)",
-                border: "1px solid rgba(251,191,36,0.2)",
-                fontFamily: "var(--mono)", fontSize: 9, color: "#fbbf24", lineHeight: 1.5,
-              }}>
-                ⚠ CRE didn't respond in 5 min — Gemini quota may be exhausted.{" "}
+              <div style={{ padding: "7px 10px", borderRadius: 7, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", fontFamily: "var(--mono)", fontSize: 9, color: "rgba(245,158,11,0.75)", lineHeight: 1.6 }}>
+                CRE didn't respond in 5m — Gemini quota may be exhausted.{" "}
                 <a href="https://aistudio.google.com" target="_blank" rel="noreferrer"
-                  style={{ color: "#fbbf24", textDecoration: "underline" }}
+                  style={{ color: "rgba(245,158,11,0.85)", textDecoration: "underline" }}
                   onClick={e => e.stopPropagation()}
                 >
                   Check quota ↗
                 </a>
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <div
-                  onClick={e => { e.stopPropagation(); onDismissSettlement(n.id, n.marketId); }}
-                  style={{
-                    padding: "4px 12px", borderRadius: 6, cursor: "pointer",
-                    border: "1px solid var(--border2)",
-                    background: "transparent",
-                    fontFamily: "var(--mono)", fontSize: 10, color: "var(--muted)",
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+                <div onClick={e => { e.stopPropagation(); onDismissSettlement(n.id, n.marketId); }}
+                  style={{ padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: "1px solid rgba(255,255,255,0.07)", background: "transparent", fontFamily: "var(--mono)", fontSize: 10, color: "rgba(255,255,255,0.3)", transition: "all 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}
                 >
                   Dismiss
                 </div>
@@ -151,24 +88,21 @@ function NotificationItem({ n, onDismissSettlement, onClaimClick }) {
             </div>
           )}
 
-          {/* Resolved */}
           {isResolved && (
-            <div style={{ marginTop: 4, fontFamily: "var(--mono)", fontSize: 9, color: "#22d3a5" }}>
+            <div style={{ marginTop: 4, fontFamily: "var(--mono)", fontSize: 9, color: "rgba(74,222,128,0.6)" }}>
               ✓ CRE responded successfully
             </div>
           )}
 
-          {/* Claim action */}
           {n.action === "claim" && (
-            <div style={{ marginTop: 6, fontFamily: "var(--mono)", fontSize: 10, color: "#22d3a5", fontWeight: 600 }}>
+            <div style={{ marginTop: 5, fontFamily: "var(--mono)", fontSize: 10, color: "rgba(74,222,128,0.7)", fontWeight: 600 }}>
               Tap to claim winnings →
             </div>
           )}
         </div>
 
-        {/* Unread dot */}
         {!n.read && !isDismissed && (
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: n.color || "#7c6af7", flexShrink: 0, marginTop: 4 }} />
+          <div style={{ width: 5, height: 5, borderRadius: "50%", background: n.color || "rgba(124,106,247,0.7)", flexShrink: 0, marginTop: 5 }} />
         )}
       </div>
     </div>
@@ -181,68 +115,62 @@ export default function NotificationPanel({ notifications, unreadCount, onMarkAl
 
   return (
     <>
-      {/* Backdrop */}
       <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={onClose} />
-
-      {/* Panel */}
       <div style={{
-        position: "fixed",
-        top: 0, right: 0, bottom: 0,
-        width: "min(400px, 100vw)",
-        zIndex: 200,
-        background: "var(--surface, #0d1117)",
-        borderLeft: "1px solid var(--border2, #30363d)",
+        position: "fixed", top: 0, right: 0, bottom: 0,
+        width: "min(380px, 100vw)", zIndex: 200,
+        background: "#111111",
+        borderLeft: "1px solid rgba(255,255,255,0.07)",
         display: "flex", flexDirection: "column",
-        boxShadow: "-20px 0 60px rgba(0,0,0,0.5)",
-        animation: "slideInRight 0.2s ease",
+        boxShadow: "-24px 0 60px rgba(0,0,0,0.6)",
+        animation: "slideInRight 0.18s ease",
       }}>
 
         {/* Header */}
-        <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 16 }}>🔔</span>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.3 }}>Notifications</span>
+        <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 5 }}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: "rgba(255,255,255,0.4)" }}><path d="M7 1.5C5 1.5 3.5 3 3.5 5v3L2 9.5h10L10.5 8V5C10.5 3 9 1.5 7 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M5.5 10.5a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+            <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.3, color: "rgba(255,255,255,0.8)" }}>Notifications</span>
             {unreadCount > 0 && (
-              <span style={{ background: "#7c6af7", color: "#fff", fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 99, fontFamily: "var(--mono)" }}>
+              <span style={{ background: "rgba(124,106,247,0.2)", color: "rgba(167,139,250,0.9)", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99, fontFamily: "var(--mono)", border: "1px solid rgba(124,106,247,0.25)" }}>
                 {unreadCount}
               </span>
             )}
-            {/* Pending / stale indicators */}
             {pendingCount > 0 && (
-              <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "#a78bfa", background: "rgba(124,106,247,0.1)", padding: "1px 6px", borderRadius: 99, border: "1px solid rgba(124,106,247,0.2)" }}>
+              <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "rgba(167,139,250,0.6)", background: "rgba(124,106,247,0.07)", padding: "1px 6px", borderRadius: 99, border: "1px solid rgba(124,106,247,0.15)" }}>
                 {pendingCount} pending
               </span>
             )}
             {staleCount > 0 && (
-              <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "#fbbf24", background: "rgba(251,191,36,0.08)", padding: "1px 6px", borderRadius: 99, border: "1px solid rgba(251,191,36,0.2)" }}>
+              <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "rgba(245,158,11,0.7)", background: "rgba(245,158,11,0.06)", padding: "1px 6px", borderRadius: 99, border: "1px solid rgba(245,158,11,0.15)" }}>
                 {staleCount} stale
               </span>
             )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
             {unreadCount > 0 && (
               <div onClick={onMarkAllRead}
-                style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--muted)", cursor: "pointer", padding: "4px 8px", borderRadius: 6, transition: "all 0.15s" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+                style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.25)", cursor: "pointer", padding: "4px 7px", borderRadius: 6, transition: "all 0.15s", whiteSpace: "nowrap" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.5)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.25)"; }}
               >
-                Mark all read
+                Mark read
               </div>
             )}
             {notifications.length > 0 && (
               <div onClick={onClearAll}
-                style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--muted)", cursor: "pointer", padding: "4px 8px", borderRadius: 6, transition: "all 0.15s" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; e.currentTarget.style.color = "#ef4444"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+                style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.25)", cursor: "pointer", padding: "4px 7px", borderRadius: 6, transition: "all 0.15s" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.07)"; e.currentTarget.style.color = "rgba(248,113,113,0.7)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.25)"; }}
               >
-                Clear all
+                Clear
               </div>
             )}
             <div onClick={onClose}
-              style={{ width: 28, height: 28, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--muted)", fontSize: 14, transition: "all 0.15s" }}
-              onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "var(--text)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--muted)"; }}
+              style={{ width: 26, height: 26, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "rgba(255,255,255,0.25)", fontSize: 12, transition: "all 0.15s", marginLeft: 2 }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.25)"; }}
             >✕</div>
           </div>
         </div>
@@ -250,50 +178,35 @@ export default function NotificationPanel({ notifications, unreadCount, onMarkAl
         {/* List */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {notifications.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, color: "var(--muted)" }}>
-              <span style={{ fontSize: 32, opacity: 0.3 }}>🔔</span>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>No notifications yet</span>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10, opacity: 0.6, textAlign: "center", maxWidth: 220, lineHeight: 1.6 }}>
-                Activity from predictions, settlements and claims will appear here
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="16" height="16" viewBox="0 0 14 14" fill="none" style={{ color: "rgba(255,255,255,0.2)" }}><path d="M7 1.5C5 1.5 3.5 3 3.5 5v3L2 9.5h10L10.5 8V5C10.5 3 9 1.5 7 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M5.5 10.5a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+              </div>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>No notifications yet</span>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.15)", textAlign: "center", maxWidth: 200, lineHeight: 1.6 }}>
+                Predictions, settlements and claims appear here
               </span>
             </div>
           ) : (
             notifications.map(n => (
-              <NotificationItem
-                key={n.id}
-                n={n}
-                onDismissSettlement={onDismissSettlement}
-                onClaimClick={onClaimClick}
-              />
+              <NotificationItem key={n.id} n={n} onDismissSettlement={onDismissSettlement} onClaimClick={onClaimClick} />
             ))
           )}
         </div>
 
         {/* Footer */}
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)", textAlign: "center" }}>
-            Notifications stored locally · Last 50 events
+        <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,0.05)", flexShrink: 0 }}>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "rgba(255,255,255,0.15)", textAlign: "center" }}>
+            Notifications stored locally · Hackathon build
           </div>
         </div>
       </div>
 
       <style>{`
-        @keyframes slideInRight {
-          from { transform: translateX(100%); opacity: 0; }
-          to   { transform: translateX(0);    opacity: 1; }
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to   { transform: rotate(360deg); }
-        }
-        @keyframes pulseGlow {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.4; }
-        }
-        @keyframes progressSlide {
-          0%   { transform: translateX(-100%); }
-          100% { transform: translateX(250%); }
-        }
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes subtlePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes progressSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
       `}</style>
     </>
   );

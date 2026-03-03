@@ -14,14 +14,14 @@ import { useNotifications, notify } from "./lib/useNotifications";
 export const client = createThirdwebClient({ clientId: CLIENT_ID });
 
 const CATEGORIES = [
-  { id: "all",       label: "All",         icon: "◈" },
-  { id: "crypto",    label: "Crypto",      icon: "₿" },
-  { id: "tech",      label: "Tech & AI",   icon: "⚡" },
-  { id: "finance",   label: "Finance",     icon: "📈" },
-  { id: "sports",    label: "Sports",      icon: "⚽" },
-  { id: "geo",       label: "Geopolitics", icon: "🌍" },
-  { id: "mine",      label: "My Markets",  icon: "👤" },
-  { id: "positions", label: "Positions",   icon: "🎯" },
+  { id: "all", label: "All", icon: "◈" },
+  { id: "crypto", label: "Crypto", icon: "₿" },
+  { id: "tech", label: "Tech & AI", icon: "⚡" },
+  { id: "finance", label: "Finance", icon: "📈" },
+  { id: "sports", label: "Sports", icon: "⚽" },
+  { id: "geo", label: "Geopolitics", icon: "🌍" },
+  { id: "mine", label: "My Markets", icon: "👤" },
+  { id: "positions", label: "Positions", icon: "🎯" },
 ];
 
 function categorizeMarket(question) {
@@ -45,18 +45,18 @@ function useWindowWidth() {
 }
 
 export default function App() {
-  const account    = useActiveAccount();
-  const width      = useWindowWidth();
-  const isMobile   = width < 640;
-  const isTablet   = width >= 640 && width < 1024;
-  const isDesktop  = width >= 1024;
+  const account = useActiveAccount();
+  const width = useWindowWidth();
+  const isMobile = width < 640;
+  const isTablet = width >= 640 && width < 1024;
+  const isDesktop = width >= 1024;
 
-  const [markets, setMarkets]           = useState([]);
-  const [positions, setPositions]       = useState({});
-  const [loading, setLoading]           = useState(false);
-  const [activeTab, setActiveTab]       = useState("all");
-  const [showCreate, setShowCreate]     = useState(false);
-  const [toast, setToast]               = useState(null);
+  const [markets, setMarkets] = useState([]);
+  const [positions, setPositions] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
+  const [showCreate, setShowCreate] = useState(false);
+  const [toast, setToast] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
 
   // Previous markets snapshot for settled detection
@@ -73,24 +73,24 @@ export default function App() {
   async function loadMarkets(silent = false) {
     if (!silent) setLoading(true);
     try {
-      const contract   = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
-      const total      = await readContract({ contract, method: "getNextMarketId" });
+      const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
+      const total = await readContract({ contract, method: "getNextMarketId" });
 
       const marketData = await Promise.all(
         Array.from({ length: Number(total) }, (_, i) =>
           readContract({ contract, method: "getMarket", params: [BigInt(i)] })
             .then(m => ({
-              id:           i,
-              creator:      m.creator,
-              createdAt:    Number(m.createdAt),
-              settledAt:    Number(m.settledAt),
-              settled:      m.settled,
-              confidence:   Number(m.confidence),
-              outcome:      Number(m.outcome),
+              id: i,
+              creator: m.creator,
+              createdAt: Number(m.createdAt),
+              settledAt: Number(m.settledAt),
+              settled: m.settled,
+              confidence: Number(m.confidence),
+              outcome: Number(m.outcome),
               totalYesPool: m.totalYesPool,
-              totalNoPool:  m.totalNoPool,
-              question:     m.question,
-              category:     categorizeMarket(m.question),
+              totalNoPool: m.totalNoPool,
+              question: m.question,
+              category: categorizeMarket(m.question),
             }))
         )
       );
@@ -166,7 +166,7 @@ export default function App() {
 
   function handleMarketCreated(id) {
     if (!addr) return;
-    const key      = `created_${addr}`;
+    const key = `created_${addr}`;
     const existing = JSON.parse(localStorage.getItem(key) || "[]");
     if (!existing.includes(`m_${id}`)) existing.push(`m_${id}`);
     localStorage.setItem(key, JSON.stringify(existing));
@@ -175,29 +175,38 @@ export default function App() {
     addNotification(notify.marketCreated(id, q));
   }
 
-  const created      = getCreatedMarkets();
+  const created = getCreatedMarkets();
   const positionMkts = markets.filter(m => positions[m.id]);
 
   function getDisplay() {
-    if (activeTab === "mine")      return created;
+    if (activeTab === "mine") return created;
     if (activeTab === "positions") return positionMkts;
-    if (activeTab === "all")       return markets;
+    if (activeTab === "all") return markets;
     return markets.filter(m => m.category === activeTab);
   }
 
-  const display    = getDisplay();
-  const totalVol   = markets.reduce((acc, m) => acc + Number(m.totalYesPool || 0) + Number(m.totalNoPool || 0), 0);
-  const openCount  = markets.filter(m => !m.settled).length;
-  const activeCat  = CATEGORIES.find(c => c.id === activeTab);
+  const display = getDisplay();
+  const totalVol = Number(
+    markets.reduce((acc, m) =>
+      acc + BigInt(m.totalYesPool || 0) + BigInt(m.totalNoPool || 0), 0n)
+  );
+
+  // Add these two new derived values near totalVol
+  const userVolume = Object.values(positions).reduce((acc, p) => acc + (p.amount || 0), 0);
+  const userWins = Object.entries(positions).filter(([id, p]) => {
+    const m = markets.find(mk => mk.id === Number(id));
+    return m?.settled && Number(p.prediction) === Number(m.outcome) && p.claimed;
+  }).length; const openCount = markets.filter(m => !m.settled).length;
+  const activeCat = CATEGORIES.find(c => c.id === activeTab);
 
   const categoryCounts = {
-    all:       markets.length,
-    crypto:    markets.filter(m => m.category === "crypto").length,
-    tech:      markets.filter(m => m.category === "tech").length,
-    finance:   markets.filter(m => m.category === "finance").length,
-    sports:    markets.filter(m => m.category === "sports").length,
-    geo:       markets.filter(m => m.category === "geo").length,
-    mine:      created.length,
+    all: markets.length,
+    crypto: markets.filter(m => m.category === "crypto").length,
+    tech: markets.filter(m => m.category === "tech").length,
+    finance: markets.filter(m => m.category === "finance").length,
+    sports: markets.filter(m => m.category === "sports").length,
+    geo: markets.filter(m => m.category === "geo").length,
+    mine: created.length,
     positions: positionMkts.length,
   };
 
@@ -206,8 +215,8 @@ export default function App() {
       <>
         <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1.5, padding: "4px 8px 10px" }}>Browse</div>
         {CATEGORIES.map(cat => {
-          const isActive   = activeTab === cat.id;
-          const count      = categoryCounts[cat.id] ?? 0;
+          const isActive = activeTab === cat.id;
+          const count = categoryCounts[cat.id] ?? 0;
           const isPersonal = cat.id === "mine" || cat.id === "positions";
           if (isPersonal && !account) return null;
           return (
@@ -272,14 +281,23 @@ export default function App() {
           </p>
         </div>
 
-        <StatsBar total={markets.length} open={openCount} volume={totalVol} />
+        <StatsBar
+          total={markets.length}
+          open={openCount}
+          volume={totalVol}
+          positions={positions}
+          userVolume={userVolume}
+          userWins={userWins}
+          account={account}
+          isMobile={isMobile}
+        />
 
         {/* Mobile pill scroll */}
         {isMobile && (
           <div style={{ marginTop: 20, marginBottom: 8 }}>
             <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6, scrollbarWidth: "none" }}>
               {CATEGORIES.map(cat => {
-                const isActive   = activeTab === cat.id;
+                const isActive = activeTab === cat.id;
                 const isPersonal = cat.id === "mine" || cat.id === "positions";
                 if (isPersonal && !account) return null;
                 return (
@@ -356,13 +374,13 @@ export default function App() {
 
       <footer style={{ borderTop: "1px solid var(--border)", padding: isMobile ? "16px 14px" : "20px 32px", display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "center", gap: isMobile ? 10 : 0, position: "relative", zIndex: 1 }}>
         <span style={{ fontFamily: "var(--mono)", fontSize: isMobile ? 10 : 11, color: "var(--muted)" }}>
-          Foresight · CRE Prediction Market · Chainlink Convergence 2026
+          Rev · CRE Prediction Market · Chainlink Convergence 2026
         </span>
         <div style={{ display: "flex", gap: isMobile ? 14 : 20, flexWrap: "wrap" }}>
           {[
-            ["GitHub",    "https://github.com/livinalt/cre-prediction-market-2.git"],
+            ["GitHub", "https://github.com/livinalt/cre-prediction-market-2.git"],
             ["Etherscan", "https://sepolia.etherscan.io/address/0xf34c4C6eE65ddbD0C71D4313B774726b280590e9"],
-            ["Tenderly",  "https://dashboard.tenderly.co/Jerly/cx/testnet/6b716f89-d035-49ad-a3c2-a6f63fc442b0"],
+            ["Tenderly", "https://dashboard.tenderly.co/Jerly/cx/testnet/6b716f89-d035-49ad-a3c2-a6f63fc442b0"],
           ].map(([l, u]) => (
             <a key={l} href={u} target="_blank" rel="noreferrer"
               style={{ fontFamily: "var(--mono)", fontSize: isMobile ? 10 : 11, color: "var(--muted)", textDecoration: "none" }}
