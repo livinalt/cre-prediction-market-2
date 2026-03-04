@@ -9,12 +9,12 @@ import { notify } from "../lib/useNotifications";
 
 function timeAgo(ts) {
   if (!ts) return "—";
-  const diff  = Date.now() - ts * 1000;
-  const mins  = Math.floor(diff / 60000);
+  const diff = Date.now() - ts * 1000;
+  const mins = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins < 1)   return "just now";
-  if (mins < 60)  return `${mins}m ago`;
+  const days = Math.floor(diff / 86400000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   return `${days}d ago`;
 }
@@ -22,8 +22,8 @@ function timeAgo(ts) {
 export default function MarketDetailModal({ market, userPosition, onClose, onRefresh, onToast, onNotify }) {
   const account = useActiveAccount();
   const { mutate: sendTx, isPending } = useSendTransaction();
-  const [settling, setSettling]     = useState(false);
-  const [claiming, setClaiming]     = useState(false);
+  const [settling, setSettling] = useState(false);
+  const [claiming, setClaiming] = useState(false);
   const [predicting, setPredicting] = useState(null);
 
   const description = localStorage.getItem(`market_desc_${market.id}`) || "";
@@ -34,17 +34,17 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const toast    = (msg, kind = "info") => onToast?.(msg, kind);
+  const toast = (msg, kind = "info") => onToast?.(msg, kind);
   const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
 
   const isPendingSettlement = !!localStorage.getItem(`pending_settlement_${market.id}`);
-  const isOpen    = !market.settled;
-  const yesPool   = Number(market.totalYesPool);
-  const noPool    = Number(market.totalNoPool);
+  const isOpen = !market.settled;
+  const yesPool = Number(market.totalYesPool);
+  const noPool = Number(market.totalNoPool);
   const totalPool = (yesPool + noPool) / 1e18;
-  const prob      = calcProb(yesPool, noPool);
-  const hasPos    = !!userPosition;
-  const userWon   = hasPos && market.settled &&
+  const prob = calcProb(yesPool, noPool);
+  const hasPos = !!userPosition;
+  const userWon = hasPos && market.settled &&
     Number(userPosition.prediction) === Number(market.outcome) && !userPosition.claimed;
   const isCreator = account?.address?.toLowerCase() === market.creator?.toLowerCase();
   const canSettle = isOpen && (isCreator || hasPos);
@@ -63,7 +63,7 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
     toast("Confirm in wallet…", "info");
     sendTx(tx, {
       onSuccess: () => { toast("Prediction placed ✓", "success"); onNotify?.(notify.predicted(market.id, side, 1_000_000_000_000_000)); setTimeout(onRefresh, 2000); setPredicting(null); },
-      onError:   e => { toast(e.message.slice(0, 60), "error"); setPredicting(null); },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setPredicting(null); },
     });
   }
 
@@ -77,7 +77,7 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
     toast("Requesting AI settlement…", "info");
     sendTx(tx, {
       onSuccess: () => { toast("Settlement requested ✓", "success"); localStorage.setItem(`pending_settlement_${market.id}`, Date.now().toString()); onNotify?.(notify.settlementRequested(market.id, market.question)); setTimeout(onRefresh, 3000); setSettling(false); },
-      onError:   e => { toast(e.message.slice(0, 60), "error"); setSettling(false); },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setSettling(false); },
     });
   }
 
@@ -91,13 +91,13 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
     toast("Claiming winnings…", "info");
     sendTx(tx, {
       onSuccess: () => { toast("Winnings claimed ✓", "success"); onNotify?.(notify.claimed(market.id, userPosition?.amount ?? 0)); setTimeout(onRefresh, 2000); setClaiming(false); },
-      onError:   e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
     });
   }
 
   const BTNS = [
-    { label: "Yes", side: 0, color: "#4ade80", bg: "rgba(34,197,94,0.08)",  hover: "rgba(34,197,94,0.15)", border: "rgba(34,197,94,0.25)" },
-    { label: "No",  side: 1, color: "#f87171", bg: "rgba(239,68,68,0.08)",  hover: "rgba(239,68,68,0.15)", border: "rgba(239,68,68,0.25)" },
+    { label: "Yes", side: 0, color: "#4ade80", bg: "rgba(34,197,94,0.08)", hover: "rgba(34,197,94,0.15)", border: "rgba(34,197,94,0.25)" },
+    { label: "No", side: 1, color: "#f87171", bg: "rgba(239,68,68,0.08)", hover: "rgba(239,68,68,0.15)", border: "rgba(239,68,68,0.25)" },
   ];
 
   return (
@@ -157,13 +157,21 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
 
-          {/* Description */}
-          {description && (
-            <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Description</div>
-              <p style={{ fontSize: 12, lineHeight: 1.65, color: "rgba(255,255,255,0.5)", margin: 0, whiteSpace: "pre-wrap" }}>{description}</p>
+          {/* Description*/}
+          <div style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+              Description
             </div>
-          )}
+            {description ? (
+              <p style={{ fontSize: 12, lineHeight: 1.65, color: "rgba(255,255,255,0.5)", margin: 0, whiteSpace: "pre-wrap" }}>
+                {description}
+              </p>
+            ) : (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.15)", margin: 0, fontFamily: "var(--mono)", fontStyle: "italic" }}>
+                No description provided
+              </p>
+            )}
+          </div>
 
           {/* Prob bar */}
           <div style={{ padding: "2px 0" }}>
@@ -180,8 +188,8 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
             {[
               { label: "Pool", value: totalPool.toFixed(4) + " ETH", color: "rgba(255,255,255,0.7)" },
-              { label: "YES",  value: (yesPool / 1e18).toFixed(4) + " ETH", color: "#4ade80" },
-              { label: "NO",   value: (noPool  / 1e18).toFixed(4) + " ETH", color: "#f87171" },
+              { label: "YES", value: (yesPool / 1e18).toFixed(4) + " ETH", color: "#4ade80" },
+              { label: "NO", value: (noPool / 1e18).toFixed(4) + " ETH", color: "#f87171" },
             ].map((s, i) => (
               <div key={i} style={{ padding: "9px 10px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", textAlign: "center" }}>
                 <div style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 600, color: s.color, marginBottom: 3 }}>{s.value}</div>
@@ -247,14 +255,14 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
             {isOpen && !hasPos && (
               <div style={{ display: "flex", gap: 6 }}>
                 {BTNS.map(btn => {
-                  const isThis  = predicting === btn.side;
+                  const isThis = predicting === btn.side;
                   const isOther = predicting !== null && predicting !== btn.side;
                   const disabled = predicting !== null || isPending;
                   return (
                     <button key={btn.side} onClick={() => placeBet(btn.side)} disabled={disabled}
                       style={{ flex: 1, padding: "9px 0", borderRadius: 7, border: `1px solid ${isThis ? btn.border : "rgba(255,255,255,0.08)"}`, background: isThis ? btn.bg : "rgba(255,255,255,0.03)", color: isThis ? btn.color : isOther ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", transition: "all 0.15s", fontFamily: "var(--sans)" }}
-                      onMouseEnter={e => { if (!disabled && !isThis) { e.currentTarget.style.background = btn.bg; e.currentTarget.style.color = btn.color; e.currentTarget.style.borderColor = btn.border; }}}
-                      onMouseLeave={e => { if (!disabled && !isThis) { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}}
+                      onMouseEnter={e => { if (!disabled && !isThis) { e.currentTarget.style.background = btn.bg; e.currentTarget.style.color = btn.color; e.currentTarget.style.borderColor = btn.border; } }}
+                      onMouseLeave={e => { if (!disabled && !isThis) { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; } }}
                     >
                       {isThis ? "Confirming…" : `${btn.label} · 0.001 ETH`}
                     </button>

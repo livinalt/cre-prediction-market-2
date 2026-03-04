@@ -1,8 +1,8 @@
 // src/lib/passport.js
 
-const SCORER_API = "https://api.passport.xyz/v2/stamps";   // ← new base
-const API_KEY    = "tz5fxQ89.rR39568xFj4CeRFa9qIf1Gvdp9upz2B4";
-const SCORER_ID  = "11945";   // confirm this is still valid for you
+const SCORER_API = "https://api.passport.xyz/v2/stamps";  
+const API_KEY    = "";
+const SCORER_ID  = "";   
 const MIN_SCORE  = 20;
 
 export async function getPassportScore(address) {
@@ -10,7 +10,7 @@ export async function getPassportScore(address) {
     const url = `${SCORER_API}/${SCORER_ID}/score/${address}`;
 
     const res = await fetch(url, {
-      method: "GET",           // explicit is clearer
+      method: "GET",           
       headers: {
         "Content-Type": "application/json",
         "X-API-KEY": API_KEY,
