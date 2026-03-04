@@ -5,13 +5,61 @@ import { sepolia } from "thirdweb/chains";
 import { client } from "../App";
 import { MARKET_ADDRESS, MARKET_ABI } from "../lib/contracts";
 
+// ── Your Pinata JWT from https://app.pinata.cloud/keys ──
+// Add VITE_PINATA_JWT=your_jwt_here to your .env file
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
+
+/**
+ * Uploads description JSON to Pinata IPFS.
+ * Returns the IPFS CID string, or "" if no description / upload fails.
+ */
+async function uploadDescriptionToIPFS(marketQuestion, description) {
+  if (!description?.trim()) return "";
+  if (!PINATA_JWT) {
+    console.warn("VITE_PINATA_JWT not set — skipping IPFS upload");
+    return "";
+  }
+
+  const payload = {
+    question:    marketQuestion.trim(),
+    description: description.trim(),
+    createdAt:   Math.floor(Date.now() / 1000),
+  };
+
+  const body = JSON.stringify({
+    pinataContent: payload,
+    pinataMetadata: {
+      name: `market-${Date.now()}`,
+    },
+  });
+
+  const res = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      Authorization:   `Bearer ${PINATA_JWT}`,
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Pinata upload failed: ${res.status} — ${text}`);
+  }
+
+  const data = await res.json();
+  return data.IpfsHash; // e.g. "QmXyz..."
+}
+
 export default function CreateMarketModal({ onClose, onCreated }) {
   const account = useActiveAccount();
   const { mutate: sendTx, isPending } = useSendTransaction();
-  const [question, setQuestion]       = useState("");
+
+  const [question,    setQuestion]    = useState("");
   const [description, setDescription] = useState("");
-  const [error, setError]             = useState("");
-  const [success, setSuccess]         = useState("");
+  const [error,       setError]       = useState("");
+  const [success,     setSuccess]     = useState("");
+  const [uploading,   setUploading]   = useState(false);
 
   function validate() {
     if (!account)         { setError("Connect your wallet first"); return false; }
@@ -19,34 +67,58 @@ export default function CreateMarketModal({ onClose, onCreated }) {
     return true;
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     setError("");
     setSuccess("");
     if (!validate()) return;
 
+    let descriptionCID = "";
+
+    // ── Step 1: Upload description to IPFS if provided ──
+    if (description.trim()) {
+      setUploading(true);
+      try {
+        descriptionCID = await uploadDescriptionToIPFS(question, description);
+      } catch (e) {
+        // Non-fatal: market still creates without description
+        console.error("IPFS upload error:", e);
+        setError(`IPFS upload failed — creating market without description. (${e.message.slice(0, 60)})`);
+        // Clear error after 3s and continue
+        setTimeout(() => setError(""), 3000);
+      } finally {
+        setUploading(false);
+      }
+    }
+
+    // ── Step 2: Create market onchain with CID (or "" if upload failed/skipped) ──
     const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
-    const tx       = prepareContractCall({
-      contract, method: "createMarket",
-      params: [question.trim()],
-    });
+
+    let tx;
+    try {
+      tx = prepareContractCall({
+        contract,
+        method: "createMarket",
+        params: [question.trim(), descriptionCID],
+      });
+    } catch (e) {
+      setError(e.message.slice(0, 80));
+      return;
+    }
 
     sendTx(tx, {
       onSuccess: (receipt) => {
-        // Save description off-chain in localStorage — never touches the contract
         const marketId = receipt?.logs?.[0]?.topics?.[1]
           ? parseInt(receipt.logs[0].topics[1], 16)
-          : Date.now(); // fallback key if id not parseable yet
+          : Date.now();
 
-        if (description.trim()) {
-          localStorage.setItem(`market_desc_${marketId}`, description.trim());
-        }
-
-        setSuccess("Market created! ✓");
+        setSuccess(`Market created! ✓${descriptionCID ? " · Description pinned to IPFS" : ""}`);
         setTimeout(() => { onCreated(marketId); onClose(); }, 2000);
       },
       onError: e => setError(e.message.slice(0, 80)),
     });
   }
+
+  const isWorking = isPending || uploading;
 
   const inputStyle = {
     width: "100%", padding: "10px 12px", borderRadius: 8,
@@ -60,6 +132,12 @@ export default function CreateMarketModal({ onClose, onCreated }) {
     color: "var(--muted)", textTransform: "uppercase",
     letterSpacing: 1, marginBottom: 6,
   };
+
+  function statusLabel() {
+    if (uploading)  return "Uploading to IPFS…";
+    if (isPending)  return "Confirm in wallet…";
+    return "Create Market";
+  }
 
   return (
     <div
@@ -95,11 +173,9 @@ export default function CreateMarketModal({ onClose, onCreated }) {
         {/* Form */}
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-          {/* Question — goes on-chain */}
+          {/* Question — stored onchain */}
           <div>
-            <label style={labelStyle}>
-              Question
-            </label>
+            <label style={labelStyle}>Question</label>
             <textarea
               placeholder="e.g. Will ETH be above $3000 by June 2026?"
               value={question}
@@ -109,14 +185,13 @@ export default function CreateMarketModal({ onClose, onCreated }) {
               onFocus={e => e.target.style.borderColor = "var(--accent)"}
               onBlur={e => e.target.style.borderColor = "var(--border2)"}
             />
-
           </div>
 
-          {/* Description — stays off-chain */}
+          {/* Description — uploaded to IPFS, CID stored onchain */}
           <div>
             <label style={labelStyle}>
               Description
-              <span style={{ marginLeft: 6, color: "#22d3a5", fontSize: 9 }}>optional</span>
+              <span style={{ marginLeft: 6, color: "#22d3a5", fontSize: 9 }}>optional · stored on IPFS</span>
             </label>
             <textarea
               placeholder="Add context, resolution criteria, sources…"
@@ -127,7 +202,24 @@ export default function CreateMarketModal({ onClose, onCreated }) {
               onFocus={e => e.target.style.borderColor = "rgba(34,211,165,0.5)"}
               onBlur={e => e.target.style.borderColor = "var(--border2)"}
             />
-
+            {/* IPFS badge — only shown when Pinata JWT is configured */}
+            {PINATA_JWT && description.trim() && (
+              <div style={{
+                marginTop: 6, display: "flex", alignItems: "center", gap: 5,
+                fontFamily: "var(--mono)", fontSize: 9, color: "rgba(34,211,165,0.6)",
+              }}>
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#22d3a5", display: "inline-block" }} />
+                Will be pinned to IPFS via Pinata · CID stored onchain
+              </div>
+            )}
+            {!PINATA_JWT && (
+              <div style={{
+                marginTop: 6, fontFamily: "var(--mono)", fontSize: 9,
+                color: "rgba(245,158,11,0.6)",
+              }}>
+                ⚠ VITE_PINATA_JWT not set — description won't be stored
+              </div>
+            )}
           </div>
         </div>
 
@@ -145,20 +237,20 @@ export default function CreateMarketModal({ onClose, onCreated }) {
 
         {/* Submit */}
         <div
-          onClick={!isPending ? handleCreate : undefined}
+          onClick={!isWorking ? handleCreate : undefined}
           style={{
             marginTop: 20, padding: "12px 0", textAlign: "center",
-            borderRadius: 10, cursor: isPending ? "default" : "pointer",
-            background: isPending ? "var(--border2)" : "linear-gradient(135deg, var(--accent), #22d3a5)",
-            color: isPending ? "var(--muted)" : "#000",
+            borderRadius: 10, cursor: isWorking ? "default" : "pointer",
+            background: isWorking ? "var(--border2)" : "linear-gradient(135deg, var(--accent), #22d3a5)",
+            color: isWorking ? "var(--muted)" : "#000",
             fontWeight: 700, fontSize: 14, letterSpacing: 0.3,
-            opacity: isPending ? 0.7 : 1, transition: "opacity 0.2s",
+            opacity: isWorking ? 0.7 : 1, transition: "opacity 0.2s",
             userSelect: "none",
           }}
-          onMouseEnter={e => { if (!isPending) e.currentTarget.style.opacity = "0.85"; }}
-          onMouseLeave={e => { e.currentTarget.style.opacity = isPending ? "0.7" : "1"; }}
+          onMouseEnter={e => { if (!isWorking) e.currentTarget.style.opacity = "0.85"; }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = isWorking ? "0.7" : "1"; }}
         >
-          {isPending ? "Confirm in wallet..." : "Create Market"}
+          {statusLabel()}
         </div>
 
       </div>

@@ -8,26 +8,55 @@ import { fmtEth, calcProb } from "../lib/utils";
 import { notify } from "../lib/useNotifications";
 import MarketDetailModal from "./MarketDetailModal";
 
-export default function MarketCard({ market, userPosition, onRefresh, onToast, onNotify }) {
+// ── shared with MarketDetailModal ──
+export function isDateReached(question) {
+  const q = question || "";
+  const patterns = [
+    /on (\w+ \d{1,2},?\s*\d{4})/i,
+    /(\w+ \d{1,2},?\s*\d{4})/i,
+    /(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/,
+    /end of (\d{4})/i,
+    /by (\w+ \d{4})/i,
+    /before (\w+ \d{4})/i,
+  ];
+  for (const p of patterns) {
+    const match = q.match(p);
+    if (match) {
+      const parsed = new Date(match[1] || match[0]);
+      if (!isNaN(parsed)) return parsed <= new Date();
+    }
+  }
+  return true;
+}
+
+export default function MarketCard({ market, userPosition, onRefresh, onPollSettled, onToast, onNotify }) {
   const account = useActiveAccount();
   const { mutate: sendTx, isPending } = useSendTransaction();
   const [predicting, setPredicting] = useState(null);
-  const [settling, setSettling]     = useState(false);
-  const [claiming, setClaiming]     = useState(false);
+  const [settling,   setSettling]   = useState(false);
+  const [claiming,   setClaiming]   = useState(false);
   const [showDetail, setShowDetail] = useState(false);
 
   const toast    = (msg, kind = "info") => onToast?.(msg, kind);
   const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
 
+  // ── clear stale pending key ──
+  useEffect(() => {
+    if (market.settled) {
+      localStorage.removeItem(`pending_settlement_${market.id}`);
+      return;
+    }
+    const stored = localStorage.getItem(`pending_settlement_${market.id}`);
+    if (stored && Date.now() - Number(stored) > 10 * 60 * 1000) {
+      localStorage.removeItem(`pending_settlement_${market.id}`);
+    }
+  }, [market.settled, market.id]);
+
   const isPendingSettlement = !!localStorage.getItem(`pending_settlement_${market.id}`);
 
-  useEffect(() => {
-    if (market.settled) localStorage.removeItem(`pending_settlement_${market.id}`);
-  }, [market.settled]);
-
   const isOpen    = !market.settled;
-  const yesPool   = Number(market.totalYesPool);
-  const noPool    = Number(market.totalNoPool);
+  const yesPool   = Number(market.totalYesPool  ?? 0);
+  const noPool    = Number(market.totalNoPool   ?? 0);
   const prob      = calcProb(yesPool, noPool);
   const hasPos    = !!userPosition;
   const userWon   = hasPos && market.settled &&
@@ -35,6 +64,7 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
   const isCreator = account?.address?.toLowerCase() === market.creator?.toLowerCase();
   const canSettle = isOpen && (isCreator || hasPos);
   const totalPool = ((yesPool + noPool) / 1e18).toFixed(4);
+  const dateOk    = isDateReached(market.question);
 
   function placeBet(side) {
     if (!account || hasPos || predicting !== null) return;
@@ -49,8 +79,13 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
     } catch { toast("Failed to prepare tx", "error"); setPredicting(null); return; }
     toast("Confirm in wallet…", "info");
     sendTx(tx, {
-      onSuccess: () => { toast("Prediction placed ✓", "success"); onNotify?.(notify.predicted(market.id, side, 1_000_000_000_000_000)); setTimeout(onRefresh, 2000); setPredicting(null); },
-      onError:   e => { toast(e.message.slice(0, 60), "error"); setPredicting(null); },
+      onSuccess: () => {
+        toast("Prediction placed ✓", "success");
+        onNotify?.(notify.predicted(market.id, side, 1_000_000_000_000_000));
+        setTimeout(() => onRefresh(true), 2000);
+        setPredicting(null);
+      },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setPredicting(null); },
     });
   }
 
@@ -64,10 +99,11 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
     toast("Requesting AI settlement…", "info");
     sendTx(tx, {
       onSuccess: () => {
-        toast("Settlement requested ✓", "success");
+        toast("Settlement requested ✓ — CRE is processing…", "success");
         localStorage.setItem(`pending_settlement_${market.id}`, Date.now().toString());
         onNotify?.(notify.settlementRequested(market.id, market.question));
-        setTimeout(onRefresh, 3000);
+        // ── use direct viem polling — bypasses Thirdweb cache ──
+        onPollSettled?.(market.id);
         setSettling(false);
       },
       onError: e => { toast(e.message.slice(0, 60), "error"); setSettling(false); },
@@ -83,12 +119,16 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
     } catch { toast("Failed to prepare tx", "error"); setClaiming(false); return; }
     toast("Claiming winnings…", "info");
     sendTx(tx, {
-      onSuccess: () => { toast("Winnings claimed ✓", "success"); onNotify?.(notify.claimed(market.id, userPosition?.amount ?? 0)); setTimeout(onRefresh, 2000); setClaiming(false); },
-      onError:   e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
+      onSuccess: () => {
+        toast("Winnings claimed ✓", "success");
+        onNotify?.(notify.claimed(market.id, userPosition?.amount ?? 0));
+        setTimeout(() => onRefresh(true), 2000);
+        setClaiming(false);
+      },
+      onError: e => { toast(e.message.slice(0, 60), "error"); setClaiming(false); },
     });
   }
 
-  // Card accent — subtle top border color per state
   const accentColor = !isOpen
     ? (market.outcome === 0 ? "#22c55e" : "#ef4444")
     : isPendingSettlement ? "#f59e0b"
@@ -168,12 +208,11 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
                 border: `1px solid ${market.outcome === 0 ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
                 padding: "2px 7px", borderRadius: 99,
               }}>
-                {market.outcome === 0 ? "YES" : "NO"} · {market.confidence}%
+                {market.outcome === 0 ? "YES" : "NO"} · {(market.confidence / 100).toFixed(0)}%
               </span>
             )}
           </div>
 
-          {/* Question */}
           <p style={{
             fontSize: 13, fontWeight: 600, lineHeight: 1.45,
             letterSpacing: -0.2, color: "rgba(255,255,255,0.82)",
@@ -191,24 +230,14 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
         {/* Prob bar */}
         <div style={{ padding: "0 14px 12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#4ade80", opacity: 0.8 }}>
-              YES {prob}%
-            </span>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#f87171", opacity: 0.7 }}>
-              {100 - prob}%
-            </span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#4ade80", opacity: 0.8 }}>YES {prob}%</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "#f87171", opacity: 0.7 }}>{100 - prob}%</span>
           </div>
-          <div style={{
-            height: 3, borderRadius: 99,
-            background: "rgba(239,68,68,0.2)",
-            overflow: "hidden",
-          }}>
+          <div style={{ height: 3, borderRadius: 99, background: "rgba(239,68,68,0.2)", overflow: "hidden" }}>
             <div style={{
-              height: "100%",
-              width: `${prob}%`,
+              height: "100%", width: `${prob}%`,
               background: "linear-gradient(90deg, #22c55e, #4ade80)",
-              borderRadius: 99,
-              transition: "width 0.5s ease",
+              borderRadius: 99, transition: "width 0.5s ease",
             }} />
           </div>
         </div>
@@ -271,24 +300,36 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
             </div>
           )}
 
-          {/* Settlement */}
+          {/* Settlement — gated by date */}
           {canSettle && (
-            <button onClick={e => { e.stopPropagation(); requestSettlement(); }} disabled={settling || isPending}
-              style={{
-                width: "100%", padding: "7px 0", borderRadius: 7,
-                border: "1px solid rgba(245,158,11,0.2)",
-                background: "rgba(245,158,11,0.06)",
-                color: "rgba(245,158,11,0.7)",
-                fontSize: 11, fontWeight: 500,
-                cursor: settling ? "not-allowed" : "pointer",
-                opacity: settling ? 0.5 : 1,
-                transition: "all 0.15s", fontFamily: "var(--sans)",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "rgba(245,158,11,0.12)"; e.currentTarget.style.color = "#f59e0b"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.35)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "rgba(245,158,11,0.06)"; e.currentTarget.style.color = "rgba(245,158,11,0.7)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.2)"; }}
-            >
-              {settling ? "Requesting…" : "Request Settlement"}
-            </button>
+            dateOk ? (
+              <button onClick={e => { e.stopPropagation(); requestSettlement(); }} disabled={settling || isPending}
+                style={{
+                  width: "100%", padding: "7px 0", borderRadius: 7,
+                  border: "1px solid rgba(245,158,11,0.2)",
+                  background: "rgba(245,158,11,0.06)",
+                  color: "rgba(245,158,11,0.7)",
+                  fontSize: 11, fontWeight: 500,
+                  cursor: settling ? "not-allowed" : "pointer",
+                  opacity: settling ? 0.5 : 1,
+                  transition: "all 0.15s", fontFamily: "var(--sans)",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(245,158,11,0.12)"; e.currentTarget.style.color = "#f59e0b"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.35)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(245,158,11,0.06)"; e.currentTarget.style.color = "rgba(245,158,11,0.7)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.2)"; }}
+              >
+                {settling ? "Requesting…" : "Request Settlement"}
+              </button>
+            ) : (
+              <div style={{
+                width: "100%", padding: "7px 0", borderRadius: 7, textAlign: "center",
+                border: "1px solid rgba(255,255,255,0.05)",
+                background: "rgba(255,255,255,0.02)",
+                fontFamily: "var(--mono)", fontSize: 10,
+                color: "rgba(255,255,255,0.2)",
+              }}>
+                🕐 Resolution date not reached
+              </div>
+            )
           )}
 
           {/* Claim */}
@@ -298,8 +339,7 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
                 width: "100%", padding: "7px 0", borderRadius: 7,
                 border: "1px solid rgba(34,197,94,0.3)",
                 background: "rgba(34,197,94,0.1)",
-                color: "#4ade80",
-                fontSize: 11, fontWeight: 600,
+                color: "#4ade80", fontSize: 11, fontWeight: 600,
                 cursor: claiming ? "not-allowed" : "pointer",
                 opacity: claiming ? 0.5 : 1,
                 transition: "all 0.15s", fontFamily: "var(--sans)",
@@ -320,12 +360,13 @@ export default function MarketCard({ market, userPosition, onRefresh, onToast, o
         </div>
       </div>
 
-      {showDetail && (
+      {showDetail && market && (
         <MarketDetailModal
           market={market}
           userPosition={userPosition}
           onClose={() => setShowDetail(false)}
           onRefresh={onRefresh}
+          onPollSettled={onPollSettled}
           onToast={onToast}
           onNotify={onNotify}
         />

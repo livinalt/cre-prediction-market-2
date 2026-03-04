@@ -17223,6 +17223,13 @@ DECISION RULES:
 - "YES" = the event happened as stated.
 - "NO" = the event did not happen as stated.
 - Do not speculate. Use only objective, verifiable information.
+- If the event has not yet occurred or cannot be verified, respond with NO and low confidence.
+
+CONFIDENCE SCALE (0-10000, in basis points):
+- 9500-10000 = near-certain (e.g. publicly confirmed, multiple sources)
+- 7000-9499  = high confidence (strong evidence)
+- 5000-6999  = moderate confidence (some evidence)
+- 0-4999     = low confidence or uncertain
 
 REMINDER:
 - Your ENTIRE response must be ONLY the JSON object described above.
@@ -17266,10 +17273,6 @@ var buildGeminiRequest = (question, apiKey) => (sendRequester, config) => {
     headers: {
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey
-    },
-    cacheSettings: {
-      store: true,
-      maxAge: "60s"
     }
   };
   const resp = sendRequester.sendRequest(req).result();
@@ -17280,7 +17283,7 @@ var buildGeminiRequest = (question, apiKey) => (sendRequester, config) => {
   const apiResponse = JSON.parse(bodyText);
   const text = apiResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
-    throw new Error("Malformed Gemini response: missing text");
+    throw new Error("Malformed Gemini response: missing text field in candidates[0].content.parts[0]");
   }
   return {
     statusCode: resp.statusCode,
@@ -17357,33 +17360,47 @@ function onLogTrigger(runtime2, log) {
     });
     runtime2.log(`[Step 2] Settled: ${market.settled} | Yes: ${market.totalYesPool} | No: ${market.totalNoPool}`);
     if (market.settled) {
-      runtime2.log("[Step 2] Already settled, skipping.");
+      runtime2.log("[Step 2] Already settled — skipping to avoid MarketAlreadySettled revert.");
       return "Market already settled";
     }
     runtime2.log("[Step 3] Querying Gemini AI...");
     const geminiResult = askGemini(runtime2, question);
-    const jsonMatch = geminiResult.geminiResponse.match(/\{[\s\S]*"result"[\s\S]*"confidence"[\s\S]*\}/);
-    if (!jsonMatch)
-      throw new Error(`No JSON in AI response: ${geminiResult.geminiResponse}`);
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!["YES", "NO"].includes(parsed.result)) {
-      throw new Error(`AI returned ${parsed.result} — cannot settle`);
+    const rawResponse = geminiResult.geminiResponse.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+    let jsonMatch = rawResponse.match(/\{[^{}]*"result"\s*:\s*"(YES|NO)"[^{}]*"confidence"\s*:\s*\d+[^{}]*\}/);
+    if (!jsonMatch) {
+      const fallback = rawResponse.match(/\{[\s\S]*?"result"[\s\S]*?"confidence"[\s\S]*?\}/);
+      if (!fallback)
+        throw new Error(`No valid JSON in AI response: ${rawResponse.slice(0, 200)}`);
+      jsonMatch = fallback;
     }
-    runtime2.log(`[Step 3] AI says: ${parsed.result} (confidence: ${parsed.confidence / 100}%)`);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      throw new Error(`JSON parse failed on: ${jsonMatch[0]}`);
+    }
+    if (!["YES", "NO"].includes(parsed.result)) {
+      throw new Error(`AI returned invalid result "${parsed.result}" — cannot settle`);
+    }
+    const confidenceRaw = Math.max(0, Math.min(1e4, Math.round(parsed.confidence)));
+    runtime2.log(`[Step 3] AI says: ${parsed.result} (confidence: ${confidenceRaw / 100}%)`);
     const outcomeValue = parsed.result === "YES" ? 0 : 1;
-    runtime2.log("[Step 4] Writing settlement...");
+    runtime2.log("[Step 4] Encoding settlement report...");
     const settlementData = encodeAbiParameters(SETTLEMENT_PARAMS, [
       marketId,
       outcomeValue,
-      parsed.confidence
+      confidenceRaw
     ]);
     const reportData = "0x01" + settlementData.slice(2);
+    runtime2.log(`[Step 4] Report bytes: ${reportData.slice(0, 40)}… (${reportData.length / 2 - 1} bytes)`);
+    runtime2.log(`[Step 4] Outcome: ${outcomeValue} (${parsed.result}), Confidence: ${confidenceRaw}`);
     const reportResponse = runtime2.report({
       encodedPayload: hexToBase64(reportData),
       encoderName: "evm",
       signingAlgo: "ecdsa",
       hashingAlgo: "keccak256"
     }).result();
+    runtime2.log("[Step 4] Writing to chain...");
     const writeResult = evmClient.writeReport(runtime2, {
       receiver: evmConfig.marketAddress,
       report: reportResponse,
@@ -17395,7 +17412,7 @@ function onLogTrigger(runtime2, log) {
       runtime2.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       return `Settled: ${txHash}`;
     }
-    throw new Error(`Transaction failed: ${writeResult.txStatus}`);
+    throw new Error(`Transaction failed with status: ${writeResult.txStatus}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     runtime2.log(`[ERROR] ${msg}`);

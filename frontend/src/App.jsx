@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createThirdwebClient, getContract, readContract } from "thirdweb";
+import { createPublicClient, http } from "viem";
+import { sepolia as viemSepolia } from "viem/chains";
 import { sepolia } from "thirdweb/chains";
 import { useActiveAccount } from "thirdweb/react";
 import Header from "./components/Header";
@@ -13,24 +15,30 @@ import { useNotifications, notify } from "./lib/useNotifications";
 
 export const client = createThirdwebClient({ clientId: CLIENT_ID });
 
+// ── Direct viem client — bypasses Thirdweb cache for fresh reads ──
+const viemClient = createPublicClient({
+  chain: viemSepolia,
+  transport: http("https://ethereum-sepolia-rpc.publicnode.com"),
+});
+
 const CATEGORIES = [
-  { id: "all", label: "All", icon: "◈" },
-  { id: "crypto", label: "Crypto", icon: "₿" },
-  { id: "tech", label: "Tech & AI", icon: "⚡" },
-  { id: "finance", label: "Finance", icon: "📈" },
-  { id: "sports", label: "Sports", icon: "⚽" },
-  { id: "geo", label: "Geopolitics", icon: "🌍" },
-  { id: "mine", label: "My Markets", icon: "👤" },
-  { id: "positions", label: "Positions", icon: "🎯" },
+  { id: "all",       label: "All",        icon: "◈" },
+  { id: "crypto",    label: "Crypto",     icon: "₿" },
+  { id: "tech",      label: "Tech & AI",  icon: "⚡" },
+  { id: "finance",   label: "Finance",    icon: "📈" },
+  { id: "sports",    label: "Sports",     icon: "⚽" },
+  { id: "geo",       label: "Geopolitics",icon: "🌍" },
+  { id: "mine",      label: "My Markets", icon: "👤" },
+  { id: "positions", label: "Positions",  icon: "🎯" },
 ];
 
 function categorizeMarket(question) {
   const q = question.toLowerCase();
   if (/btc|bitcoin|eth|ethereum|solana|sol|crypto|defi|chainlink|link|token|blockchain|nft|web3|dex|tvl|gas|gwei/.test(q)) return "crypto";
-  if (/openai|gpt|ai|apple|google|meta|tesla|self.driving|autonomous|siri|gemini|llm|model/.test(q)) return "tech";
-  if (/s&p|nasdaq|stock|fed|inflation|interest rate|dollar|gold|market cap|gdp|recession|bond/.test(q)) return "finance";
-  if (/football|soccer|nba|nfl|nhl|mlb|champions|league|cup|playoff|win|score|season/.test(q)) return "sports";
-  if (/war|election|president|government|policy|trade deal|nato|eu|uk|china|russia|deal|sanction/.test(q)) return "geo";
+  if (/openai|gpt|ai|apple|google|meta|tesla|self.driving|autonomous|siri|gemini|llm|model/.test(q))                        return "tech";
+  if (/s&p|nasdaq|stock|fed|inflation|interest rate|dollar|gold|market cap|gdp|recession|bond/.test(q))                    return "finance";
+  if (/football|soccer|nba|nfl|nhl|mlb|champions|league|cup|playoff|win|score|season/.test(q))                             return "sports";
+  if (/war|election|president|government|policy|trade deal|nato|eu|uk|china|russia|deal|sanction/.test(q))                 return "geo";
   return "crypto";
 }
 
@@ -44,23 +52,50 @@ function useWindowWidth() {
   return width;
 }
 
+// ── Read a single market directly via viem (no cache) ──
+async function readMarketDirect(marketId) {
+  try {
+    const m = await viemClient.readContract({
+      address: MARKET_ADDRESS,
+      abi: MARKET_ABI,
+      functionName: "getMarket",
+      args: [BigInt(marketId)],
+    });
+    return {
+      id: marketId,
+      creator:      m.creator,
+      createdAt:    Number(m.createdAt),
+      settledAt:    Number(m.settledAt),
+      settled:      m.settled,
+      confidence:   Number(m.confidence),
+      outcome:      Number(m.outcome),
+      totalYesPool: m.totalYesPool,
+      totalNoPool:  m.totalNoPool,
+      question:     m.question,
+      category:     categorizeMarket(m.question),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
-  const account = useActiveAccount();
-  const width = useWindowWidth();
-  const isMobile = width < 640;
-  const isTablet = width >= 640 && width < 1024;
+  const account  = useActiveAccount();
+  const width    = useWindowWidth();
+  const isMobile  = width < 640;
+  const isTablet  = width >= 640 && width < 1024;
   const isDesktop = width >= 1024;
 
-  const [markets, setMarkets] = useState([]);
-  const [positions, setPositions] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("all");
-  const [showCreate, setShowCreate] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [markets,           setMarkets]           = useState([]);
+  const [positions,         setPositions]         = useState({});
+  const [loading,           setLoading]           = useState(false);
+  const [activeTab,         setActiveTab]         = useState("all");
+  const [showCreate,        setShowCreate]        = useState(false);
+  const [toast,             setToast]             = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Previous markets snapshot for settled detection
   const prevMarketsRef = useRef([]);
+  const positionsRef   = useRef({});  // keep positions in a ref for the settled-detection closure
 
   const addr = account?.address?.toLowerCase();
   const { notifications, addNotification, dismissSettlement, markAllRead, clearAll, unreadCount } = useNotifications(addr);
@@ -70,46 +105,42 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  async function loadMarkets(silent = false) {
+  // ── Main market loader (uses Thirdweb for bulk reads) ──
+  const loadMarkets = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
-      const total = await readContract({ contract, method: "getNextMarketId" });
+      const total    = await readContract({ contract, method: "getNextMarketId" });
 
       const marketData = await Promise.all(
         Array.from({ length: Number(total) }, (_, i) =>
           readContract({ contract, method: "getMarket", params: [BigInt(i)] })
             .then(m => ({
-              id: i,
-              creator: m.creator,
-              createdAt: Number(m.createdAt),
-              settledAt: Number(m.settledAt),
-              settled: m.settled,
-              confidence: Number(m.confidence),
-              outcome: Number(m.outcome),
+              id:           i,
+              creator:      m.creator,
+              createdAt:    Number(m.createdAt),
+              settledAt:    Number(m.settledAt),
+              settled:      m.settled,
+              confidence:   Number(m.confidence),
+              outcome:      Number(m.outcome),
               totalYesPool: m.totalYesPool,
-              totalNoPool: m.totalNoPool,
-              question: m.question,
-              category: categorizeMarket(m.question),
+              totalNoPool:  m.totalNoPool,
+              question:     m.question,
+              category:     categorizeMarket(m.question),
             }))
         )
       );
 
-      // ── Settled detection — notify user if a market they predicted in just settled ──
+      // ── Settled detection ──
       if (prevMarketsRef.current.length > 0 && addr) {
-        const currentPositions = positions;
+        const currentPositions = positionsRef.current;
         marketData.forEach(m => {
           const prev = prevMarketsRef.current.find(p => p.id === m.id);
           if (!prev) return;
-          // Was open before, now settled
           if (!prev.settled && m.settled && currentPositions[m.id]) {
             const pos = currentPositions[m.id];
             const won = Number(pos.prediction) === Number(m.outcome);
-            addNotification(
-              won
-                ? notify.won(m.id, m.question)
-                : notify.lost(m.id, m.question)
-            );
+            addNotification(won ? notify.won(m.id, m.question) : notify.lost(m.id, m.question));
             showToast(
               won
                 ? `🏆 Market #${m.id} settled — you won! Claim your ETH.`
@@ -125,7 +156,9 @@ export default function App() {
 
       if (account?.address) {
         const contract2 = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
-        await loadPositions(marketData, contract2, account.address);
+        const pos = await loadPositionsRaw(marketData, contract2, account.address);
+        positionsRef.current = pos;
+        setPositions(pos);
       }
     } catch (e) {
       console.error("Load failed:", e);
@@ -133,9 +166,9 @@ export default function App() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }
+  }, [account?.address, addr]);
 
-  async function loadPositions(marketData, contract, walletAddr) {
+  async function loadPositionsRaw(marketData, contract, walletAddr) {
     const pos = {};
     await Promise.all(marketData.map(async m => {
       const pred = await readContract({ contract, method: "getPrediction", params: [BigInt(m.id), walletAddr] });
@@ -143,20 +176,53 @@ export default function App() {
         pos[m.id] = { amount: Number(pred.amount), prediction: Number(pred.prediction), claimed: pred.claimed };
       }
     }));
-    setPositions(pos);
+    return pos;
   }
+
+  // ── Post-settlement aggressive poll using DIRECT viem reads (no cache) ──
+  // Call this from MarketCard/MarketDetailModal after requestSettlement succeeds
+  const pollUntilSettled = useCallback((marketId) => {
+    let attempts = 0;
+    const maxAttempts = 12; // poll for up to 60 seconds
+    const intervalMs  = 5000;
+
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const fresh = await readMarketDirect(marketId);
+        if (fresh && fresh.settled) {
+          // Market is now settled — update state immediately without waiting for bulk reload
+          setMarkets(prev => prev.map(m => m.id === marketId ? { ...m, ...fresh } : m));
+          localStorage.removeItem(`pending_settlement_${marketId}`);
+          clearInterval(poll);
+          // Also do a full refresh to sync everything
+          loadMarkets(true);
+          return;
+        }
+      } catch (e) {
+        console.warn(`Poll attempt ${attempts} failed:`, e);
+      }
+      if (attempts >= maxAttempts) {
+        clearInterval(poll);
+        // Give up polling — full refresh as fallback
+        loadMarkets(true);
+      }
+    }, intervalMs);
+
+    return () => clearInterval(poll);
+  }, [loadMarkets]);
 
   // Initial load
   useEffect(() => { loadMarkets(); }, [account?.address]);
 
-  // Poll silently — 10s if any settlements are pending, 30s otherwise
+  // Background polling — 8s if any pending, 30s otherwise
   useEffect(() => {
     const hasPending = markets.some(m =>
       localStorage.getItem(`pending_settlement_${m.id}`) && !m.settled
     );
-    const interval = setInterval(() => loadMarkets(true), hasPending ? 10_000 : 30_000);
+    const interval = setInterval(() => loadMarkets(true), hasPending ? 8_000 : 30_000);
     return () => clearInterval(interval);
-  }, [account?.address, markets]);
+  }, [account?.address, markets, loadMarkets]);
 
   function getCreatedMarkets() {
     if (!addr) return [];
@@ -166,47 +232,47 @@ export default function App() {
 
   function handleMarketCreated(id) {
     if (!addr) return;
-    const key = `created_${addr}`;
+    const key      = `created_${addr}`;
     const existing = JSON.parse(localStorage.getItem(key) || "[]");
     if (!existing.includes(`m_${id}`)) existing.push(`m_${id}`);
     localStorage.setItem(key, JSON.stringify(existing));
-    // Notify
     const q = markets.find(m => m.id === id)?.question ?? "";
     addNotification(notify.marketCreated(id, q));
   }
 
-  const created = getCreatedMarkets();
+  const created     = getCreatedMarkets();
   const positionMkts = markets.filter(m => positions[m.id]);
 
   function getDisplay() {
-    if (activeTab === "mine") return created;
+    if (activeTab === "mine")      return created;
     if (activeTab === "positions") return positionMkts;
-    if (activeTab === "all") return markets;
+    if (activeTab === "all")       return markets;
     return markets.filter(m => m.category === activeTab);
   }
 
-  const display = getDisplay();
+  const display  = getDisplay();
   const totalVol = Number(
     markets.reduce((acc, m) =>
       acc + BigInt(m.totalYesPool || 0) + BigInt(m.totalNoPool || 0), 0n)
   );
 
-  // Add these two new derived values near totalVol
   const userVolume = Object.values(positions).reduce((acc, p) => acc + (p.amount || 0), 0);
-  const userWins = Object.entries(positions).filter(([id, p]) => {
+  const userWins   = Object.entries(positions).filter(([id, p]) => {
     const m = markets.find(mk => mk.id === Number(id));
     return m?.settled && Number(p.prediction) === Number(m.outcome) && p.claimed;
-  }).length; const openCount = markets.filter(m => !m.settled).length;
-  const activeCat = CATEGORIES.find(c => c.id === activeTab);
+  }).length;
+
+  const openCount  = markets.filter(m => !m.settled).length;
+  const activeCat  = CATEGORIES.find(c => c.id === activeTab);
 
   const categoryCounts = {
-    all: markets.length,
-    crypto: markets.filter(m => m.category === "crypto").length,
-    tech: markets.filter(m => m.category === "tech").length,
-    finance: markets.filter(m => m.category === "finance").length,
-    sports: markets.filter(m => m.category === "sports").length,
-    geo: markets.filter(m => m.category === "geo").length,
-    mine: created.length,
+    all:       markets.length,
+    crypto:    markets.filter(m => m.category === "crypto").length,
+    tech:      markets.filter(m => m.category === "tech").length,
+    finance:   markets.filter(m => m.category === "finance").length,
+    sports:    markets.filter(m => m.category === "sports").length,
+    geo:       markets.filter(m => m.category === "geo").length,
+    mine:      created.length,
     positions: positionMkts.length,
   };
 
@@ -215,8 +281,8 @@ export default function App() {
       <>
         <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1.5, padding: "4px 8px 10px" }}>Browse</div>
         {CATEGORIES.map(cat => {
-          const isActive = activeTab === cat.id;
-          const count = categoryCounts[cat.id] ?? 0;
+          const isActive   = activeTab === cat.id;
+          const count      = categoryCounts[cat.id] ?? 0;
           const isPersonal = cat.id === "mine" || cat.id === "positions";
           if (isPersonal && !account) return null;
           return (
@@ -297,7 +363,7 @@ export default function App() {
           <div style={{ marginTop: 20, marginBottom: 8 }}>
             <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6, scrollbarWidth: "none" }}>
               {CATEGORIES.map(cat => {
-                const isActive = activeTab === cat.id;
+                const isActive   = activeTab === cat.id;
                 const isPersonal = cat.id === "mine" || cat.id === "positions";
                 if (isPersonal && !account) return null;
                 return (
@@ -362,6 +428,7 @@ export default function App() {
               markets={display}
               positions={positions}
               onRefresh={loadMarkets}
+              onPollSettled={pollUntilSettled}
               showEmpty={false}
               onToast={showToast}
               onNotify={addNotification}
@@ -378,9 +445,9 @@ export default function App() {
         </span>
         <div style={{ display: "flex", gap: isMobile ? 14 : 20, flexWrap: "wrap" }}>
           {[
-            ["GitHub", "https://github.com/livinalt/cre-prediction-market-2.git"],
+            ["GitHub",    "https://github.com/livinalt/Rev-Market"],
             ["Etherscan", "https://sepolia.etherscan.io/address/0xf34c4C6eE65ddbD0C71D4313B774726b280590e9"],
-            ["Tenderly", "https://dashboard.tenderly.co/Jerly/cx/testnet/6b716f89-d035-49ad-a3c2-a6f63fc442b0"],
+            ["Tenderly",  "https://dashboard.tenderly.co/Jerly/cx/testnet/6b716f89-d035-49ad-a3c2-a6f63fc442b0"],
           ].map(([l, u]) => (
             <a key={l} href={u} target="_blank" rel="noreferrer"
               style={{ fontFamily: "var(--mono)", fontSize: isMobile ? 10 : 11, color: "var(--muted)", textDecoration: "none" }}

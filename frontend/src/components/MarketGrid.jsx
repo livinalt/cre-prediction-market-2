@@ -1,6 +1,6 @@
 import MarketCard from "./MarketCard";
 
-export default function MarketGrid({ markets, positions, onRefresh, showEmpty, onToast, onNotify, isMobile, isTablet }) {
+export default function MarketGrid({ markets, positions, onRefresh, onPollSettled, showEmpty, onToast, onNotify, isMobile, isTablet }) {
   const cols = isMobile ? 1 : isTablet ? 2 : 3;
 
   if (!markets.length && showEmpty) {
@@ -52,6 +52,7 @@ export default function MarketGrid({ markets, positions, onRefresh, showEmpty, o
           market={m}
           userPosition={positions[m.id]}
           onRefresh={onRefresh}
+          onPollSettled={onPollSettled}
           onToast={onToast}
           onNotify={onNotify}
         />

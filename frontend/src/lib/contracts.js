@@ -1,4 +1,4 @@
-export const MARKET_ADDRESS = "0xf34c4C6eE65ddbD0C71D4313B774726b280590e9";
+export const MARKET_ADDRESS = "0x24Af9cB5AE46eA0cB233809DAc88A0d849E0a2A1";
 export const CLIENT_ID      = "54ffb4fd22a8acbf17aa4797d0468008";
 
 export const MARKET_ABI = [
@@ -9,15 +9,16 @@ export const MARKET_ABI = [
     outputs: [{
       name: "", type: "tuple",
       components: [
-        { name: "creator",      type: "address" },
-        { name: "createdAt",    type: "uint48"  },
-        { name: "settledAt",    type: "uint48"  },
-        { name: "settled",      type: "bool"    },
-        { name: "confidence",   type: "uint16"  },
-        { name: "outcome",      type: "uint8"   },
-        { name: "totalYesPool", type: "uint256" },
-        { name: "totalNoPool",  type: "uint256" },
-        { name: "question",     type: "string"  },
+        { name: "creator",        type: "address" },
+        { name: "createdAt",      type: "uint48"  },
+        { name: "settledAt",      type: "uint48"  },
+        { name: "settled",        type: "bool"    },
+        { name: "confidence",     type: "uint16"  },
+        { name: "outcome",        type: "uint8"   },
+        { name: "totalYesPool",   type: "uint256" },
+        { name: "totalNoPool",    type: "uint256" },
+        { name: "question",       type: "string"  },
+        { name: "descriptionCID", type: "string"  }, // IPFS CID — empty string if none
       ]
     }]
   },
@@ -44,7 +45,10 @@ export const MARKET_ABI = [
   // ── Write ─────────────────────────────────────────────────────
   {
     name: "createMarket", type: "function", stateMutability: "nonpayable",
-    inputs: [{ name: "question", type: "string" }],
+    inputs: [
+      { name: "question",       type: "string" },
+      { name: "descriptionCID", type: "string" }, // pass "" if no description
+    ],
     outputs: [{ name: "marketId", type: "uint256" }]
   },
   {
@@ -70,15 +74,16 @@ export const MARKET_ABI = [
   {
     name: "MarketCreated", type: "event",
     inputs: [
-      { name: "marketId", type: "uint256", indexed: true },
-      { name: "question", type: "string",  indexed: false },
-      { name: "creator",  type: "address", indexed: false },
+      { name: "marketId",       type: "uint256", indexed: true  },
+      { name: "question",       type: "string",  indexed: false },
+      { name: "descriptionCID", type: "string",  indexed: false }, // IPFS CID
+      { name: "creator",        type: "address", indexed: false },
     ]
   },
   {
     name: "SettlementRequested", type: "event",
     inputs: [
-      { name: "marketId", type: "uint256", indexed: true },
+      { name: "marketId", type: "uint256", indexed: true  },
       { name: "question", type: "string",  indexed: false },
     ]
   },

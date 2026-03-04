@@ -13,7 +13,7 @@ contract PredictionMarket is ReceiverTemplate {
     error AlreadyClaimed();
     error TransferFailed();
 
-    event MarketCreated(uint256 indexed marketId, string question, address creator);
+    event MarketCreated(uint256 indexed marketId, string question, string descriptionCID, address creator);
     event PredictionMade(uint256 indexed marketId, address indexed predictor, Prediction prediction, uint256 amount);
     event SettlementRequested(uint256 indexed marketId, string question);
     event MarketSettled(uint256 indexed marketId, Prediction outcome, uint16 confidence);
@@ -31,6 +31,7 @@ contract PredictionMarket is ReceiverTemplate {
         uint256 totalYesPool;
         uint256 totalNoPool;
         string question;
+        string descriptionCID; // IPFS CID — empty string if no description provided
     }
 
     struct UserPrediction {
@@ -45,20 +46,22 @@ contract PredictionMarket is ReceiverTemplate {
 
     constructor(address _forwarderAddress) ReceiverTemplate(_forwarderAddress) {}
 
-    function createMarket(string memory question) public returns (uint256 marketId) {
+    // descriptionCID is optional — pass empty string "" if no description
+    function createMarket(string memory question, string memory descriptionCID) public returns (uint256 marketId) {
         marketId = nextMarketId++;
         markets[marketId] = Market({
-            creator: msg.sender,
-            createdAt: uint48(block.timestamp),
-            settledAt: 0,
-            settled: false,
-            confidence: 0,
-            outcome: Prediction.Yes,
-            totalYesPool: 0,
-            totalNoPool: 0,
-            question: question
+            creator:        msg.sender,
+            createdAt:      uint48(block.timestamp),
+            settledAt:      0,
+            settled:        false,
+            confidence:     0,
+            outcome:        Prediction.Yes,
+            totalYesPool:   0,
+            totalNoPool:    0,
+            question:       question,
+            descriptionCID: descriptionCID
         });
-        emit MarketCreated(marketId, question, msg.sender);
+        emit MarketCreated(marketId, question, descriptionCID, msg.sender);
     }
 
     function predict(uint256 marketId, Prediction prediction) external payable {
@@ -70,9 +73,9 @@ contract PredictionMarket is ReceiverTemplate {
         if (userPred.amount != 0) revert AlreadyPredicted();
 
         predictions[marketId][msg.sender] = UserPrediction({
-            amount: msg.value,
+            amount:     msg.value,
             prediction: prediction,
-            claimed: false
+            claimed:    false
         });
 
         if (prediction == Prediction.Yes) {
@@ -98,10 +101,10 @@ contract PredictionMarket is ReceiverTemplate {
         if (m.creator == address(0)) revert MarketDoesNotExist();
         if (m.settled) revert MarketAlreadySettled();
 
-        markets[marketId].settled = true;
+        markets[marketId].settled    = true;
         markets[marketId].confidence = confidence;
-        markets[marketId].settledAt = uint48(block.timestamp);
-        markets[marketId].outcome = outcome;
+        markets[marketId].settledAt  = uint48(block.timestamp);
+        markets[marketId].outcome    = outcome;
         emit MarketSettled(marketId, outcome, confidence);
     }
 
@@ -109,8 +112,15 @@ contract PredictionMarket is ReceiverTemplate {
         if (report.length > 0 && report[0] == 0x01) {
             _settleMarket(report[1:]);
         } else {
-            string memory question = abi.decode(report, (string));
-            createMarket(question);
+            // HTTP trigger path: abi-encoded (question, descriptionCID)
+            // If only question is encoded (legacy), descriptionCID defaults to ""
+            if (report.length > 64) {
+                (string memory question, string memory descriptionCID) = abi.decode(report, (string, string));
+                createMarket(question, descriptionCID);
+            } else {
+                string memory question = abi.decode(report, (string));
+                createMarket(question, "");
+            }
         }
     }
 
@@ -125,10 +135,10 @@ contract PredictionMarket is ReceiverTemplate {
         if (userPred.prediction != m.outcome) revert NothingToClaim();
 
         predictions[marketId][msg.sender].claimed = true;
-        uint256 totalPool = m.totalYesPool + m.totalNoPool;
+        uint256 totalPool   = m.totalYesPool + m.totalNoPool;
         uint256 winningPool = m.outcome == Prediction.Yes ? m.totalYesPool : m.totalNoPool;
-        uint256 payout = (userPred.amount * totalPool) / winningPool;
-        (bool success,) = msg.sender.call{value: payout}("");
+        uint256 payout      = (userPred.amount * totalPool) / winningPool;
+        (bool success,)     = msg.sender.call{value: payout}("");
         if (!success) revert TransferFailed();
         emit WinningsClaimed(marketId, msg.sender, payout);
     }

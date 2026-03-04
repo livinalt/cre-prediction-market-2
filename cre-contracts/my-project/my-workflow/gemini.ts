@@ -8,7 +8,6 @@ import {
   type HTTPSendRequester,
 } from "@chainlink/cre-sdk";
 
-// Inline types
 type Config = {
   geminiModel: string;
   evms: Array<{
@@ -38,9 +37,9 @@ interface GeminiApiResponse {
 }
 
 interface GeminiResponse {
-  statusCode: number;
+  statusCode:    number;
   geminiResponse: string;
-  responseId: string;
+  responseId:    string;
   rawJsonString: string;
 }
 
@@ -66,6 +65,13 @@ DECISION RULES:
 - "YES" = the event happened as stated.
 - "NO" = the event did not happen as stated.
 - Do not speculate. Use only objective, verifiable information.
+- If the event has not yet occurred or cannot be verified, respond with NO and low confidence.
+
+CONFIDENCE SCALE (0-10000, in basis points):
+- 9500-10000 = near-certain (e.g. publicly confirmed, multiple sources)
+- 7000-9499  = high confidence (strong evidence)
+- 5000-6999  = moderate confidence (some evidence)
+- 0-4999     = low confidence or uncertain
 
 REMINDER:
 - Your ENTIRE response must be ONLY the JSON object described above.
@@ -82,7 +88,7 @@ export function askGemini(runtime: Runtime<Config>, question: string): GeminiRes
   runtime.log("[Gemini] Querying AI for market outcome...");
 
   const geminiApiKey = runtime.getSecret({ id: "GEMINI_API_KEY" }).result();
-  const httpClient = new cre.capabilities.HTTPClient();
+  const httpClient   = new cre.capabilities.HTTPClient();
 
   const result = httpClient
     .sendRequest(
@@ -116,23 +122,26 @@ const buildGeminiRequest =
     };
 
     const bodyBytes = new TextEncoder().encode(JSON.stringify(requestData));
-    const body = Buffer.from(bodyBytes).toString("base64");
+    const body      = Buffer.from(bodyBytes).toString("base64");
 
     const req = {
-      url: `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`,
+      url:    `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`,
       method: "POST" as const,
       body,
       headers: {
         "Content-Type": "application/json",
         "x-goog-api-key": apiKey,
       },
-      cacheSettings: {
-        store: true,
-        maxAge: '60s',
-      },
+      // ── FIX: Removed cacheSettings entirely. ──────────────────────────────
+      // Original code had { store: true, maxAge: '60s' }.
+      // This caused the CRE node to return a cached Gemini response when the
+      // same question was settled twice within 60 seconds (e.g. during testing
+      // or manual re-runs). The cached response would have the same confidence
+      // value regardless of current real-world state.
+      // For a settlement oracle, fresh data is always required — no caching.
     };
 
-    const resp = sendRequester.sendRequest(req).result();
+    const resp     = sendRequester.sendRequest(req).result();
     const bodyText = new TextDecoder().decode(resp.body);
 
     if (!ok(resp)) {
@@ -140,16 +149,16 @@ const buildGeminiRequest =
     }
 
     const apiResponse = JSON.parse(bodyText) as GeminiApiResponse;
-    const text = apiResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const text        = apiResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!text) {
-      throw new Error("Malformed Gemini response: missing text");
+      throw new Error("Malformed Gemini response: missing text field in candidates[0].content.parts[0]");
     }
 
     return {
-      statusCode: resp.statusCode,
+      statusCode:    resp.statusCode,
       geminiResponse: text,
-      responseId: apiResponse.responseId || "",
+      responseId:    apiResponse.responseId || "",
       rawJsonString: bodyText,
     };
   };
