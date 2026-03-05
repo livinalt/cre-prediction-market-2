@@ -15,7 +15,6 @@ import { useNotifications, notify } from "./lib/useNotifications";
 
 export const client = createThirdwebClient({ clientId: CLIENT_ID });
 
-// ── Direct viem client — bypasses Thirdweb cache for fresh reads ──
 const viemClient = createPublicClient({
   chain: viemSepolia,
   transport: http("https://ethereum-sepolia-rpc.publicnode.com"),
@@ -52,7 +51,6 @@ function useWindowWidth() {
   return width;
 }
 
-// ── Read a single market directly via viem (no cache) ──
 async function readMarketDirect(marketId) {
   try {
     const m = await viemClient.readContract({
@@ -62,17 +60,18 @@ async function readMarketDirect(marketId) {
       args: [BigInt(marketId)],
     });
     return {
-      id: marketId,
-      creator:      m.creator,
-      createdAt:    Number(m.createdAt),
-      settledAt:    Number(m.settledAt),
-      settled:      m.settled,
-      confidence:   Number(m.confidence),
-      outcome:      Number(m.outcome),
-      totalYesPool: m.totalYesPool,
-      totalNoPool:  m.totalNoPool,
-      question:     m.question,
-      category:     categorizeMarket(m.question),
+      id:             marketId,
+      creator:        m.creator,
+      createdAt:      Number(m.createdAt),
+      settledAt:      Number(m.settledAt),
+      settled:        m.settled,
+      confidence:     Number(m.confidence),
+      outcome:        Number(m.outcome),
+      totalYesPool:   m.totalYesPool,
+      totalNoPool:    m.totalNoPool,
+      question:       m.question,
+      category:       categorizeMarket(m.question),
+      descriptionCID: m.descriptionCID ?? "",
     };
   } catch {
     return null;
@@ -80,8 +79,8 @@ async function readMarketDirect(marketId) {
 }
 
 export default function App() {
-  const account  = useActiveAccount();
-  const width    = useWindowWidth();
+  const account   = useActiveAccount();
+  const width     = useWindowWidth();
   const isMobile  = width < 640;
   const isTablet  = width >= 640 && width < 1024;
   const isDesktop = width >= 1024;
@@ -95,7 +94,7 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
 
   const prevMarketsRef = useRef([]);
-  const positionsRef   = useRef({});  // keep positions in a ref for the settled-detection closure
+  const positionsRef   = useRef({});
 
   const addr = account?.address?.toLowerCase();
   const { notifications, addNotification, dismissSettlement, markAllRead, clearAll, unreadCount } = useNotifications(addr);
@@ -105,7 +104,6 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  // ── Main market loader (uses Thirdweb for bulk reads) ──
   const loadMarkets = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -116,22 +114,22 @@ export default function App() {
         Array.from({ length: Number(total) }, (_, i) =>
           readContract({ contract, method: "getMarket", params: [BigInt(i)] })
             .then(m => ({
-              id:           i,
-              creator:      m.creator,
-              createdAt:    Number(m.createdAt),
-              settledAt:    Number(m.settledAt),
-              settled:      m.settled,
-              confidence:   Number(m.confidence),
-              outcome:      Number(m.outcome),
-              totalYesPool: m.totalYesPool,
-              totalNoPool:  m.totalNoPool,
-              question:     m.question,
-              category:     categorizeMarket(m.question),
+              id:             i,
+              creator:        m.creator,
+              createdAt:      Number(m.createdAt),
+              settledAt:      Number(m.settledAt),
+              settled:        m.settled,
+              confidence:     Number(m.confidence),
+              outcome:        Number(m.outcome),
+              totalYesPool:   m.totalYesPool,
+              totalNoPool:    m.totalNoPool,
+              question:       m.question,
+              category:       categorizeMarket(m.question),
+              descriptionCID: m.descriptionCID ?? "",
             }))
         )
       );
 
-      // ── Settled detection ──
       if (prevMarketsRef.current.length > 0 && addr) {
         const currentPositions = positionsRef.current;
         marketData.forEach(m => {
@@ -179,43 +177,92 @@ export default function App() {
     return pos;
   }
 
-  // ── Post-settlement aggressive poll using DIRECT viem reads (no cache) ──
-  // Call this from MarketCard/MarketDetailModal after requestSettlement succeeds
-  const pollUntilSettled = useCallback((marketId) => {
-    let attempts = 0;
-    const maxAttempts = 12; // poll for up to 60 seconds
-    const intervalMs  = 5000;
-
-    const poll = setInterval(async () => {
-      attempts++;
-      try {
-        const fresh = await readMarketDirect(marketId);
-        if (fresh && fresh.settled) {
-          // Market is now settled — update state immediately without waiting for bulk reload
-          setMarkets(prev => prev.map(m => m.id === marketId ? { ...m, ...fresh } : m));
-          localStorage.removeItem(`pending_settlement_${marketId}`);
-          clearInterval(poll);
-          // Also do a full refresh to sync everything
-          loadMarkets(true);
-          return;
-        }
-      } catch (e) {
-        console.warn(`Poll attempt ${attempts} failed:`, e);
-      }
-      if (attempts >= maxAttempts) {
-        clearInterval(poll);
-        // Give up polling — full refresh as fallback
-        loadMarkets(true);
-      }
-    }, intervalMs);
-
-    return () => clearInterval(poll);
+  // Called when a settlement is confirmed (either via event or polling).
+  const onSettlementConfirmed = useCallback(async (marketId) => {
+    localStorage.removeItem(`pending_settlement_${marketId}`);
+    const fresh = await readMarketDirect(marketId);
+    if (fresh) {
+      setMarkets(prev => prev.map(m => m.id === marketId ? { ...m, ...fresh } : m));
+    }
+    loadMarkets(true);
   }, [loadMarkets]);
 
-  // Initial load
+  // ── Event-based settlement detection ──
+  // Subscribes to the MarketSettled onchain event for instant UI update.
+  // Automatically falls back to 5s interval polling if event watching fails.
+  const pollUntilSettled = useCallback((marketId) => {
+    let unwatchFn   = null;
+    let fallbackInt = null;
+    let resolved    = false;
+
+    // Give up after 10 minutes regardless
+    const safetyTimeout = setTimeout(() => {
+      cleanup();
+      loadMarkets(true);
+    }, 10 * 60 * 1000);
+
+    function cleanup() {
+      if (resolved) return;
+      resolved = true;
+      unwatchFn?.();
+      clearInterval(fallbackInt);
+      clearTimeout(safetyTimeout);
+    }
+
+    // subscribe to onchain event for instant update
+    try {
+      unwatchFn = viemClient.watchContractEvent({
+        address:   MARKET_ADDRESS,
+        abi:       MARKET_ABI,
+        eventName: "MarketSettled",
+        onLogs: (logs) => {
+          for (const log of logs) {
+            if (Number(log.args.marketId) === Number(marketId)) {
+              cleanup();
+              onSettlementConfirmed(marketId);
+              return;
+            }
+          }
+        },
+        onError: (err) => {
+          console.warn("watchContractEvent error — falling back to polling:", err);
+          unwatchFn?.();
+          startFallbackPoll();
+        },
+      });
+    } catch (err) {
+      console.warn("watchContractEvent unavailable — using polling:", err);
+      startFallbackPoll();
+    }
+
+    // Fallback: 5s interval polling, max 12 attempts (60s) ──
+    function startFallbackPoll() {
+      if (resolved) return;
+      let attempts = 0;
+      fallbackInt = setInterval(async () => {
+        attempts++;
+        try {
+          const fresh = await readMarketDirect(marketId);
+          if (fresh?.settled) {
+            cleanup();
+            onSettlementConfirmed(marketId);
+            return;
+          }
+        } catch (e) {
+          console.warn(`Fallback poll attempt ${attempts} failed:`, e);
+        }
+        if (attempts >= 12) {
+          cleanup();
+          loadMarkets(true);
+        }
+      }, 5000);
+    }
+
+    return cleanup; 
+  }, [loadMarkets, onSettlementConfirmed]);
+
   useEffect(() => { loadMarkets(); }, [account?.address]);
 
-  // Background polling — 8s if any pending, 30s otherwise
   useEffect(() => {
     const hasPending = markets.some(m =>
       localStorage.getItem(`pending_settlement_${m.id}`) && !m.settled
@@ -240,7 +287,7 @@ export default function App() {
     addNotification(notify.marketCreated(id, q));
   }
 
-  const created     = getCreatedMarkets();
+  const created      = getCreatedMarkets();
   const positionMkts = markets.filter(m => positions[m.id]);
 
   function getDisplay() {
@@ -262,8 +309,8 @@ export default function App() {
     return m?.settled && Number(p.prediction) === Number(m.outcome) && p.claimed;
   }).length;
 
-  const openCount  = markets.filter(m => !m.settled).length;
-  const activeCat  = CATEGORIES.find(c => c.id === activeTab);
+  const openCount = markets.filter(m => !m.settled).length;
+  const activeCat = CATEGORIES.find(c => c.id === activeTab);
 
   const categoryCounts = {
     all:       markets.length,
@@ -329,7 +376,6 @@ export default function App() {
 
       <main style={{ maxWidth: 1280, margin: "0 auto", padding: isMobile ? "20px 14px 60px" : isTablet ? "28px 20px 60px" : "40px 32px 60px", position: "relative", zIndex: 1 }}>
 
-        {/* Hero */}
         <div style={{ marginBottom: isMobile ? 20 : 40 }}>
           <div style={{ fontFamily: "var(--mono)", fontSize: isMobile ? 9 : 11, color: "var(--accent)", letterSpacing: 2, textTransform: "uppercase", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ display: "block", width: 24, height: 1, background: "var(--accent)" }} />
@@ -358,7 +404,6 @@ export default function App() {
           isMobile={isMobile}
         />
 
-        {/* Mobile pill scroll */}
         {isMobile && (
           <div style={{ marginTop: 20, marginBottom: 8 }}>
             <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6, scrollbarWidth: "none" }}>
@@ -384,17 +429,14 @@ export default function App() {
           </div>
         )}
 
-        {/* Main layout */}
         <div style={{ display: "flex", gap: 0, marginTop: isMobile ? 8 : 32, alignItems: "flex-start", border: "1px solid var(--border)", borderRadius: isMobile ? 10 : 14, overflow: "hidden" }}>
 
-          {/* Desktop sidebar */}
           {!isMobile && (
             <div style={{ width: isTablet ? 148 : 180, flexShrink: 0, borderRight: "1px solid var(--border)", background: "var(--surface)", position: "sticky", top: 80, maxHeight: "calc(100vh - 120px)", overflowY: "auto", padding: "12px 8px", display: "flex", flexDirection: "column", gap: 2, alignSelf: "flex-start" }}>
               <SidebarCategories />
             </div>
           )}
 
-          {/* Grid area */}
           <div style={{ flex: 1, minWidth: 0, padding: isMobile ? "12px 10px" : isTablet ? "16px" : "20px", background: "var(--bg)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: isMobile ? 12 : 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10 }}>

@@ -8,7 +8,7 @@ import { fmtEth, calcProb } from "../lib/utils";
 import { notify } from "../lib/useNotifications";
 import MarketDetailModal from "./MarketDetailModal";
 
-// ── shared with MarketDetailModal ──
+// Extracts a date from the question text and checks if it's reached. Returns true if no date found or on parse failure.
 export function isDateReached(question) {
   const q = question || "";
   const patterns = [
@@ -40,7 +40,7 @@ export default function MarketCard({ market, userPosition, onRefresh, onPollSett
   const toast    = (msg, kind = "info") => onToast?.(msg, kind);
   const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
 
-  // ── clear stale pending key ──
+  // Clear pending settlement flag after 10min or if market is settled
   useEffect(() => {
     if (market.settled) {
       localStorage.removeItem(`pending_settlement_${market.id}`);
@@ -102,7 +102,7 @@ export default function MarketCard({ market, userPosition, onRefresh, onPollSett
         toast("Settlement requested ✓ — CRE is processing…", "success");
         localStorage.setItem(`pending_settlement_${market.id}`, Date.now().toString());
         onNotify?.(notify.settlementRequested(market.id, market.question));
-        // ── use direct viem polling — bypasses Thirdweb cache ──
+        // Poll for settlement after a delay to give CRE time to process. In a real app, consider using events or a more robust polling strategy.
         onPollSettled?.(market.id);
         setSettling(false);
       },

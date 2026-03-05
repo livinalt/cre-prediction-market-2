@@ -147,7 +147,7 @@ export default function HowItWorksModal({ onClose }) {
               </p>
 
               <a
-                href="https://sepolia.etherscan.io/address/0xf34c4C6eE65ddbD0C71D4313B774726b280590e9"
+                href="https://sepolia.etherscan.io/address/0xCC24b932F524ECCf11E6Eb3B8e9860046328fb71 "
                 target="_blank" rel="noreferrer"
                 style={{
                   display: "flex", alignItems: isMobile ? "flex-start" : "center",
@@ -165,7 +165,7 @@ export default function HowItWorksModal({ onClose }) {
               >
                 <span style={{ fontWeight: 500, color: "#e6edf3" }}>PredictionMarket.sol</span>
                 {!isMobile && <span style={{ color: "var(--muted)" }}>·</span>}
-                <span style={{ color: "var(--muted)", fontSize: isMobile ? "0.7rem" : "0.8125rem" }}>0xf34c4...0590e9</span>
+                <span style={{ color: "var(--muted)", fontSize: isMobile ? "0.7rem" : "0.8125rem" }}>0xCC24b....28fb71 </span>
                 {!isMobile && <span style={{ color: "var(--muted)" }}>·</span>}
                 <span>Ethereum Sepolia ↗</span>
               </a>

@@ -5,8 +5,7 @@ import { sepolia } from "thirdweb/chains";
 import { client } from "../App";
 import { MARKET_ADDRESS, MARKET_ABI } from "../lib/contracts";
 
-// ── Your Pinata JWT from https://app.pinata.cloud/keys ──
-// Add VITE_PINATA_JWT=your_jwt_here to your .env file
+
 const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
 
 /**
@@ -48,7 +47,7 @@ async function uploadDescriptionToIPFS(marketQuestion, description) {
   }
 
   const data = await res.json();
-  return data.IpfsHash; // e.g. "QmXyz..."
+  return data.IpfsHash; 
 }
 
 export default function CreateMarketModal({ onClose, onCreated }) {
@@ -74,23 +73,23 @@ export default function CreateMarketModal({ onClose, onCreated }) {
 
     let descriptionCID = "";
 
-    // ── Step 1: Upload description to IPFS if provided ──
+    // Step 1: Upload description to IPFS
     if (description.trim()) {
       setUploading(true);
       try {
         descriptionCID = await uploadDescriptionToIPFS(question, description);
       } catch (e) {
-        // Non-fatal: market still creates without description
+        
         console.error("IPFS upload error:", e);
         setError(`IPFS upload failed — creating market without description. (${e.message.slice(0, 60)})`);
-        // Clear error after 3s and continue
+        
         setTimeout(() => setError(""), 3000);
       } finally {
         setUploading(false);
       }
     }
 
-    // ── Step 2: Create market onchain with CID (or "" if upload failed/skipped) ──
+    // Step 2: Create market onchain with CID
     const contract = getContract({ client, chain: sepolia, address: MARKET_ADDRESS, abi: MARKET_ABI });
 
     let tx;

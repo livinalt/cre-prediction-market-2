@@ -8,11 +8,11 @@ import { fmtEth, calcProb } from "../lib/utils";
 import { notify } from "../lib/useNotifications";
 import { isDateReached } from "./MarketCard";
 
-// Multiple gateways for fallback resilience
+// Multiple gateways for fallback
 const IPFS_GATEWAYS = [
-  "https://gateway.pinata.cloud/ipfs/",
-  "https://ipfs.io/ipfs/",
-  "https://cloudflare-ipfs.com/ipfs/",
+  "https://coffee-blank-owl-368.mypinata.cloud/ipfs/",  
+  "https://gateway.pinata.cloud/ipfs/",                  
+  "https://ipfs.io/ipfs/",                               
 ];
 
 /**
@@ -35,11 +35,11 @@ async function fetchDescriptionFromIPFS(cid) {
       descriptionCache[cid] = desc;
       return desc;
     } catch {
-      // try next gateway
+      
     }
   }
 
-  descriptionCache[cid] = null; // cache miss so we don't keep retrying
+  descriptionCache[cid] = null; 
   return null;
 }
 
@@ -68,19 +68,13 @@ export default function MarketDetailModal({ market, userPosition, onClose, onRef
   const [settling,     setSettling]     = useState(false);
   const [claiming,     setClaiming]     = useState(false);
   const [predicting,   setPredicting]   = useState(null);
-  const [description,  setDescription]  = useState(null);   // null = loading, "" = none
+  const [description,  setDescription]  = useState(null);  
   const [descLoading,  setDescLoading]  = useState(false);
 
-  // ── Fetch description from IPFS on mount / when CID changes ──
+  // Fetch description from IPFS on mount / when CID changes 
   useEffect(() => {
     const cid = market.descriptionCID;
 
-    // Fallback: old markets (before IPFS) may have localStorage description
-    if (!cid) {
-      const local = localStorage.getItem(`market_desc_${market.id}`);
-      setDescription(local || "");
-      return;
-    }
 
     setDescLoading(true);
     fetchDescriptionFromIPFS(cid)

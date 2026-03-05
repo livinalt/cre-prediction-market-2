@@ -1,20 +1,22 @@
 // src/lib/useNotifications.js
 import { useState, useCallback, useEffect } from "react";
 
-const STORAGE_KEY   = "foresight_notifications";
-const MAX_NOTIFS    = 50;
-const STALE_MS      = 5 * 60 * 1000; // 5 minutes → stale
+const STORAGE_KEY = "foresight_notifications";
+const MAX_NOTIFS  = 50;
+const STALE_MS    = 5 * 60 * 1000; // Stales after 5 minutes
 
 function loadFromStorage(addr) {
   try {
-    const key = addr ? `${STORAGE_KEY}_${addr.toLowerCase()}` : STORAGE_KEY;
+    const key = addr ? `${STORAGE_KEY}_${addr.toLowerCase()}` : null;
+    if (!key) return []; 
     return JSON.parse(localStorage.getItem(key) || "[]");
   } catch { return []; }
 }
 
 function saveToStorage(notifications, addr) {
   try {
-    const key = addr ? `${STORAGE_KEY}_${addr.toLowerCase()}` : STORAGE_KEY;
+    if (!addr) return; 
+    const key = `${STORAGE_KEY}_${addr.toLowerCase()}`;
     localStorage.setItem(key, JSON.stringify(notifications.slice(0, MAX_NOTIFS)));
   } catch {}
 }
@@ -22,12 +24,17 @@ function saveToStorage(notifications, addr) {
 export function useNotifications(addr) {
   const [notifications, setNotifications] = useState(() => loadFromStorage(addr));
 
+  useEffect(() => {
+    setNotifications(loadFromStorage(addr));
+  }, [addr]);
+
   // Tick every 30s to move pending → stale automatically
   useEffect(() => {
+    if (!addr) return;
     const tick = setInterval(() => {
       setNotifications(prev => {
-        const now     = Date.now();
-        let changed   = false;
+        const now   = Date.now();
+        let changed = false;
         const updated = prev.map(n => {
           if (n.status === "pending" && now - n.timestamp > STALE_MS) {
             changed = true;
@@ -46,11 +53,12 @@ export function useNotifications(addr) {
   }, [addr]);
 
   const addNotification = useCallback((notification) => {
+    if (!addr) return null; 
     const n = {
       id:        Date.now() + Math.random(),
       timestamp: Date.now(),
       read:      false,
-      status:    "default", // default | pending | stale | resolved | dismissed
+      status:    "default",
       ...notification,
     };
     setNotifications(prev => {
@@ -61,7 +69,6 @@ export function useNotifications(addr) {
     return n.id;
   }, [addr]);
 
-  // Update an existing notification by id
   const updateNotification = useCallback((id, patch) => {
     setNotifications(prev => {
       const updated = prev.map(n => n.id === id ? { ...n, ...patch } : n);
@@ -70,11 +77,8 @@ export function useNotifications(addr) {
     });
   }, [addr]);
 
-  // Dismiss a pending/stale settlement notification → clears pending state
   const dismissSettlement = useCallback((notifId, marketId) => {
-    // Clear localStorage pending flag for this market
     localStorage.removeItem(`pending_settlement_${marketId}`);
-    // Mark notification as dismissed
     setNotifications(prev => {
       const updated = prev.map(n =>
         n.id === notifId
@@ -86,7 +90,6 @@ export function useNotifications(addr) {
     });
   }, [addr]);
 
-  // Called when CRE successfully settles — update the pending notification
   const resolveSettlement = useCallback((marketId, outcome) => {
     localStorage.removeItem(`pending_settlement_${marketId}`);
     setNotifications(prev => {
@@ -109,7 +112,6 @@ export function useNotifications(addr) {
   }, [addr]);
 
   const clearAll = useCallback(() => {
-    // Also clear all pending settlement flags
     notifications.forEach(n => {
       if (n.marketId) localStorage.removeItem(`pending_settlement_${n.marketId}`);
     });
@@ -131,25 +133,24 @@ export function useNotifications(addr) {
   };
 }
 
-// ── Notification factory helpers ──────────────────────────────────────
+// Notification factory helpers 
 export const notify = {
   marketCreated: (id, question) => ({
-    type:    "created",
-    icon:    "✦",
-    title:   `Market #${id} created`,
-    detail:  question?.slice(0, 60) + (question?.length > 60 ? "…" : ""),
-    color:   "#a78bfa",
+    type:   "created",
+    icon:   "✦",
+    title:  `Market #${id} created`,
+    detail: question?.slice(0, 60) + (question?.length > 60 ? "…" : ""),
+    color:  "#a78bfa",
   }),
 
   predicted: (id, side, amount) => ({
-    type:    "predicted",
-    icon:    "◎",
-    title:   `Predicted ${side === 0 ? "YES" : "NO"} on Market #${id}`,
-    detail:  `${(Number(amount) / 1e18).toFixed(4)} ETH staked`,
-    color:   side === 0 ? "#22c55e" : "#ef4444",
+    type:   "predicted",
+    icon:   "◎",
+    title:  `Predicted ${side === 0 ? "YES" : "NO"} on Market #${id}`,
+    detail: `${(Number(amount) / 1e18).toFixed(4)} ETH staked`,
+    color:  side === 0 ? "#22c55e" : "#ef4444",
   }),
 
-  // Settlement requested — starts as pending, auto-updates to stale after 5min
   settlementRequested: (id, question) => ({
     type:     "settlement",
     status:   "pending",
@@ -172,11 +173,11 @@ export const notify = {
   }),
 
   lost: (id, question) => ({
-    type:    "lost",
-    icon:    "◌",
-    title:   `Market #${id} resolved — you lost`,
-    detail:  question?.slice(0, 60) + (question?.length > 60 ? "…" : ""),
-    color:   "#6b7280",
+    type:   "lost",
+    icon:   "◌",
+    title:  `Market #${id} resolved — you lost`,
+    detail: question?.slice(0, 60) + (question?.length > 60 ? "…" : ""),
+    color:  "#6b7280",
   }),
 
   claimed: (id, amount) => ({
@@ -188,10 +189,10 @@ export const notify = {
   }),
 
   settled: (id, question) => ({
-    type:    "settled",
-    icon:    "⚡",
-    title:   `Settlement requested on Market #${id}`,
-    detail:  question?.slice(0, 60) + (question?.length > 60 ? "…" : ""),
-    color:   "#fbbf24",
+    type:   "settled",
+    icon:   "⚡",
+    title:  `Settlement requested on Market #${id}`,
+    detail: question?.slice(0, 60) + (question?.length > 60 ? "…" : ""),
+    color:  "#fbbf24",
   }),
 };
