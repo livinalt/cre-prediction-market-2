@@ -19,12 +19,12 @@ const initWorkflow = (config: Config) => {
 
   // ── EVM Log Trigger ──────────────────────────────────────────────
 
-  const evmConfig = config.evms[0];  // or loop over config.evms if multiple
+  const evmConfig = config.evms[0]; 
 
   const network = getNetwork({
     chainFamily: "evm",
     chainSelectorName: evmConfig.chainSelectorName,
-    isTestnet: true,  // flip to false for mainnet chains
+    isTestnet: true, 
   });
 
   if (!network) {
